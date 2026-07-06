@@ -84,6 +84,13 @@ class ExecutionRepository(Protocol):
         """Execution count grouped by status."""
         ...
 
+    async def delete_older_than(self, cutoff: datetime) -> int:
+        """Delete executions started before ``cutoff``; returns the count.
+
+        Child rows cascade. This is the retention job's single operation.
+        """
+        ...
+
 
 class NodeExecutionRepository(Protocol):
     async def upsert(self, node: NodeExecution) -> NodeExecution: ...

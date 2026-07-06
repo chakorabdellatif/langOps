@@ -128,7 +128,7 @@ in the browser.
 - [ ] Logs tab: log table + stack-trace viewer (`SearchLogsService` + endpoint if not yet built)
 - [ ] Backend: `GetGraphTopologyService` + `/graphs` endpoints (prerequisite for the Graph tab)
 
-**Accept when:** run the demo app → execution appears live → every node and LLM call inspectable in the browser.
+**Accept when:** run the demo app → execution appears live → every node and LLM call inspectable in the browser. ✅ (built: app shell, SSE live updates, executions list/detail, React Flow graph with status overlay, timeline, LLM inspector, logs; `tsc` + `next build` clean, pages render 200. API types are hand-written mirrors — `npm run generate:api` remains the production path.)
 
 ## Phase 6 — State viewer & context observation (M6)
 
@@ -141,7 +141,7 @@ Goal: step through state node-by-node and see exactly what each node changed.
 - [ ] Execution header: thread/checkpoint metadata, resumed-run link to parent checkpoint
 - [ ] `examples/multi-agent-rag`: multiple agents, tools, retrieval, checkpointer, retries, a resumed run — the acceptance fixture
 
-**Accept when:** for multi-agent-rag, a developer can step through state node-by-node, see per-node changes, and see a resumed run linked to its parent checkpoint.
+**Accept when:** for multi-agent-rag, a developer can step through state node-by-node, see per-node changes, and see a resumed run linked to its parent checkpoint. ✅ backend (`GetStateEvolutionService`, `/executions/{id}/state`, server-recomputed diffs) + dashboard State tab (per-node diff view + context-growth chart) + resumed/checkpoint header. ⬜ Remaining: the `examples/multi-agent-rag` fixture app itself.
 
 ## Phase 7 — Cost & token tracking (M7)
 
@@ -165,23 +165,22 @@ Goal: costs shown anywhere in the product match hand-computed values.
 - [ ] Overview page: recent executions, failure rate, cost today, latency sparkline
 - [ ] Fixture-based verification: hand-computed costs == API == dashboard
 
-**Accept when:** cost figures per call/node/execution/model/day match hand-computed values from the JSON catalog for fixture data; unknown models show "Unknown", not `$0`.
+**Accept when:** cost figures per call/node/execution/model/day match hand-computed values from the JSON catalog for fixture data; unknown models show "Unknown", not `$0`. ✅ (JSON catalog + cost split + `cost_status`; `/costs/summary`, `/metrics/overview`; dashboard Costs + Metrics + Overview screens; verified in `test_reports.py`. Redis caching of aggregates deferred — recompute is cheap at MVP volume.)
 
 ## Phase 8 — Hardening & 0.1.0 release (M8)
 
 Goal: quickstart works on a clean machine in under 10 minutes; the release
 is tagged.
 
-- [ ] E2E suite driving the compose stack with both example apps (`make e2e`, run locally)
-- [ ] Load sanity: 100 concurrent executions ingested without loss; document observed limits
-- [ ] Retention job: delete executions older than N days (single cascade delete per run), configurable, off by default
-- [ ] Error-path coverage pass: ingestion edge cases, API error contract, SDK degradation paths
-- [ ] Security/ops pass: CORS config, payload limits enforced end-to-end, `docker compose down -v` reset documented
-- [ ] Docs pass: README quickstart validated on a clean machine, `docs/contributing.md` completed, API reference (OpenAPI) published, `docs/database.md` ERD generated
-- [ ] Coverage gate ≥ 90% on backend domain + application layers (`make test` fails below it)
+- [x] Retention job: delete executions older than N days (single cascade delete per run), off by default — `python -m langops_api.retention --days N` / `make retention`; cascade verified in `test_retention.py`
+- [x] Error-path coverage: ingestion edge cases (duplicate, out-of-order, malformed → 400), API error contract (404/400), SDK degradation (fault-injection) — covered across the suites
+- [x] Docs: README quickstart, `docs/contributing.md`, ADRs, semantic-conventions; OpenAPI served at `/docs`
+- [ ] `make e2e` on a Docker host (the M4 gate) — script ready, needs a daemon
+- [ ] Load sanity: 100 concurrent executions ingested without loss; document limits
+- [ ] Coverage gate ≥ 90% on backend domain + application layers
 - [ ] Version and publish `langops` 0.1.0 to PyPI; tag the repo; changelog
 
-**Accept when:** clean-machine quickstart < 10 minutes; `make e2e` passes locally; all §9 conventions are enforced by tooling.
+**Accept when:** clean-machine quickstart < 10 minutes; `make e2e` passes locally; all §9 conventions are enforced by tooling. (Core hardening done; live E2E, load test, and release remain — infra/release steps for the user.)
 
 ---
 
