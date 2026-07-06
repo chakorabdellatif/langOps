@@ -54,7 +54,7 @@ in every table and correct query-API responses.
 
 ### 2.2 Persistence
 - [x] Alembic `env.py` (async, DATABASE_URL from env) + initial migration: full §4 schema (all 9 tables, indexes, FKs, cascades)
-- [x] `model_pricing` seed (current OpenAI/Anthropic prices, `effective_from` history model) — canonical list in `infrastructure/db/pricing_seed.py`, used by both migration and dev/test path
+- [x] `model_pricing` seed (current OpenAI/Anthropic prices, `effective_from` history model) — canonical list in `infrastructure/db/pricing_seed.py`, used by both migration and dev/test path. **Interim only** — replaced by a JSON catalog in Phase 7 (ADR-0002); `$0`-for-unknown is a known gap fixed there.
 - [x] SQLAlchemy ORM models (separate from domain entities, portable JSONB/JSON) + entity↔row mappers
 - [x] Postgres repository implementations (upsert on OTel natural keys)
 - [x] Default project auto-created lazily on first ingest/query
@@ -147,7 +147,17 @@ Goal: step through state node-by-node and see exactly what each node changed.
 
 Goal: costs shown anywhere in the product match hand-computed values.
 
-- [ ] Pricing table: seed data reviewed/documented (`docs/database.md`), effective-dating logic (latest price ≤ call time)
+> **Pricing design (ADR-0002):** JSON catalog, not a DB table. Prices live in
+> per-provider files under `infrastructure/pricing/` (`openai.json`,
+> `anthropic.json`, `ollama.json`, …), loaded into an in-memory pricing service
+> at startup — editing a price is a JSON edit + restart, no migration. The
+> Phase 2 interim (DB `model_pricing` table + Python seed, `$0` for unknown
+> models) is replaced here.
+
+- [ ] JSON catalog files per provider + loader; support local models (ollama `0`/`0`) and an optional user custom catalog
+- [ ] Replace `PricingRepository` DB lookup with the catalog service; drop the `model_pricing` table, its seed migration, and `infrastructure/db/pricing_seed.py`
+- [ ] **Unknown models → `cost_status: "unknown"`, never `$0`** (nullable cost); dashboard renders "Unknown"
+- [ ] Split cost into `input_cost` / `output_cost` / `total_cost` on `llm_calls` (schema change)
 - [ ] `CostCalculator` wired through ingestion for every LLM call; execution/node rollups verified idempotent
 - [ ] `GetCostReportService` + `GET /api/v1/costs/summary` (by model / graph / day), Redis-cached with short TTL
 - [ ] `GetMetricsService` + `GET /api/v1/metrics/overview` (latency percentiles, failure rate, throughput), Redis-cached
@@ -155,7 +165,7 @@ Goal: costs shown anywhere in the product match hand-computed values.
 - [ ] Overview page: recent executions, failure rate, cost today, latency sparkline
 - [ ] Fixture-based verification: hand-computed costs == API == dashboard
 
-**Accept when:** cost figures per call/node/execution/model/day match hand-computed values from the pricing table for fixture data.
+**Accept when:** cost figures per call/node/execution/model/day match hand-computed values from the JSON catalog for fixture data; unknown models show "Unknown", not `$0`.
 
 ## Phase 8 — Hardening & 0.1.0 release (M8)
 
