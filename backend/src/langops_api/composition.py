@@ -45,7 +45,7 @@ from langops_api.infrastructure.db.repositories import (
 )
 from langops_api.infrastructure.db.session import create_engine, create_session_factory
 from langops_api.infrastructure.otlp import ParsedSpan, parse_traces
-from langops_api.infrastructure.pricing import CatalogPricingRepository
+from langops_api.infrastructure.pricing import PricingCatalog
 from langops_api.infrastructure.settings import Settings
 
 
@@ -59,7 +59,7 @@ class Container:
         self.cost_calculator = CostCalculator()
         self.state_differ = StateDiffer()
         # Pricing catalog is loaded once from JSON at startup (ADR-0002).
-        self.pricing = CatalogPricingRepository.load(settings.pricing_catalog_dir)
+        self.pricing = PricingCatalog(settings.pricing_catalog_dir)
         self.publisher: EventPublisher
         if settings.redis_url:
             self.redis: Redis | None = Redis.from_url(settings.redis_url)

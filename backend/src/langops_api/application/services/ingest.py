@@ -105,7 +105,7 @@ class IngestTelemetryService:
             call.execution_id = execution_id
             call.node_execution_id = await resolve_node(parent_span_id)
             if call.provider and call.model:
-                pricing = await self._pricing.get_price(call.provider, call.model)
+                pricing = await self._pricing.get_price(call.provider, call.model, call.started_at)
                 call.cost = self._cost_calculator.calculate(call.tokens, pricing)
                 if pricing is None:
                     logger.debug("no pricing for %s/%s", call.provider, call.model)

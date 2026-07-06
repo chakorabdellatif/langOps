@@ -145,6 +145,11 @@ class LogRepository(Protocol):
 
 
 class PricingRepository(Protocol):
-    async def get_price(self, provider: str, model: str) -> ModelPricing | None:
-        """Catalog price for a model, or None when unpriced (ADR-0002)."""
+    async def get_price(
+        self, provider: str, model: str, at: datetime | None = None
+    ) -> ModelPricing | None:
+        """Catalog price effective at ``at`` (default now), or None when unpriced.
+
+        Implementations may prefix-match dated model variants (ADR-0002).
+        """
         ...
