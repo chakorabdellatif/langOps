@@ -228,6 +228,24 @@ class PostgresGraphRepository:
             created_at=row.created_at,
         )
 
+    async def list_by_project(self, project_id: UUID) -> list[Graph]:
+        rows = await self._session.scalars(
+            sa.select(GraphModel)
+            .where(GraphModel.project_id == project_id)
+            .order_by(GraphModel.created_at.desc())
+        )
+        return [
+            Graph(
+                id=r.id,
+                project_id=r.project_id,
+                name=r.name,
+                topology=r.topology,
+                topology_hash=r.topology_hash,
+                created_at=r.created_at,
+            )
+            for r in rows
+        ]
+
 
 class PostgresExecutionRepository:
     def __init__(self, session: AsyncSession) -> None:
@@ -236,6 +254,27 @@ class PostgresExecutionRepository:
     async def get(self, execution_id: UUID) -> Execution | None:
         row = await self._session.get(ExecutionModel, execution_id)
         return None if row is None else _execution_to_entity(row)
+
+    async def list_durations(self, project_id: UUID, since: datetime | None = None) -> list[int]:
+        query = sa.select(ExecutionModel.duration_ms).where(
+            ExecutionModel.project_id == project_id,
+            ExecutionModel.duration_ms.is_not(None),
+        )
+        if since is not None:
+            query = query.where(ExecutionModel.started_at >= since)
+        rows = await self._session.scalars(query)
+        return [int(d) for d in rows if d is not None]
+
+    async def status_counts(
+        self, project_id: UUID, since: datetime | None = None
+    ) -> dict[str, int]:
+        query = sa.select(ExecutionModel.status, sa.func.count()).where(
+            ExecutionModel.project_id == project_id
+        )
+        if since is not None:
+            query = query.where(ExecutionModel.started_at >= since)
+        rows = await self._session.execute(query.group_by(ExecutionModel.status))
+        return {status: int(count) for status, count in rows.all()}
 
     async def get_by_trace_id(self, trace_id: str) -> Execution | None:
         row = await self._session.scalar(
@@ -426,6 +465,47 @@ class PostgresLlmCallRepository:
         ).one()
         return TokenUsage(int(result[0]), int(result[1])), Decimal(str(result[2]))
 
+    async def cost_by_model(self, project_id: UUID) -> list[dict[str, Any]]:
+        unknown = sa.case((LlmCallModel.cost_status == "unknown", 1), else_=0)
+        rows = await self._session.execute(
+            sa.select(
+                LlmCallModel.provider,
+                LlmCallModel.model,
+                sa.func.coalesce(sa.func.sum(LlmCallModel.input_tokens), 0),
+                sa.func.coalesce(sa.func.sum(LlmCallModel.output_tokens), 0),
+                sa.func.coalesce(sa.func.sum(LlmCallModel.cost), 0),
+                sa.func.count(),
+                sa.func.coalesce(sa.func.sum(unknown), 0),
+            )
+            .join(ExecutionModel, ExecutionModel.id == LlmCallModel.execution_id)
+            .where(ExecutionModel.project_id == project_id)
+            .group_by(LlmCallModel.provider, LlmCallModel.model)
+            .order_by(sa.func.coalesce(sa.func.sum(LlmCallModel.cost), 0).desc())
+        )
+        return [
+            {
+                "provider": provider,
+                "model": model,
+                "input_tokens": int(inp),
+                "output_tokens": int(out),
+                "total_cost": float(cost),
+                "calls": int(calls),
+                "unknown_calls": int(unknown_calls),
+            }
+            for provider, model, inp, out, cost, calls, unknown_calls in rows.all()
+        ]
+
+    async def cost_by_day(self, project_id: UUID) -> list[dict[str, Any]]:
+        day = sa.func.date(LlmCallModel.started_at)
+        rows = await self._session.execute(
+            sa.select(day, sa.func.coalesce(sa.func.sum(LlmCallModel.cost), 0))
+            .join(ExecutionModel, ExecutionModel.id == LlmCallModel.execution_id)
+            .where(ExecutionModel.project_id == project_id, LlmCallModel.started_at.is_not(None))
+            .group_by(day)
+            .order_by(day)
+        )
+        return [{"day": str(d), "total_cost": float(cost)} for d, cost in rows.all()]
+
 
 class PostgresToolCallRepository:
     def __init__(self, session: AsyncSession) -> None:
@@ -486,7 +566,7 @@ class PostgresStateSnapshotRepository:
             self._session.add(row)
         row.node_execution_id = snapshot.node_execution_id or row.node_execution_id
         row.state = snapshot.state if snapshot.state is not None else row.state
-        row.diff = snapshot.diff.to_dict() if snapshot.diff is not None else row.diff
+        row.diff = snapshot.diff if snapshot.diff is not None else row.diff
         row.size_bytes = snapshot.size_bytes
         row.message_count = snapshot.message_count
         row.created_at = snapshot.created_at or row.created_at

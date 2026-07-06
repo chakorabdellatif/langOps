@@ -11,11 +11,17 @@ from langops_api.application.services.queries import (
     GetExecutionDetailService,
     ListExecutionsService,
 )
-from langops_api.composition import get_execution_detail_service, get_list_executions_service
+from langops_api.application.services.reports import GetStateEvolutionService
+from langops_api.composition import (
+    get_execution_detail_service,
+    get_list_executions_service,
+    get_state_evolution_service,
+)
 from langops_api.presentation.schemas import (
     ExecutionDetailResponse,
     ExecutionListResponse,
     LogResponse,
+    StateEvolutionResponse,
     TimelineEntryResponse,
 )
 
@@ -67,3 +73,11 @@ async def get_execution_logs(
     service: GetExecutionDetailService = Depends(get_execution_detail_service),
 ) -> list[LogResponse]:
     return [LogResponse.from_entity(r) for r in await service.logs(execution_id)]
+
+
+@router.get("/{execution_id}/state", response_model=StateEvolutionResponse)
+async def get_execution_state(
+    execution_id: UUID,
+    service: GetStateEvolutionService = Depends(get_state_evolution_service),
+) -> StateEvolutionResponse:
+    return StateEvolutionResponse.from_dto(await service.get(execution_id))

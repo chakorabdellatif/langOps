@@ -125,7 +125,7 @@ class IngestTelemetryService:
             # Diffs are recomputed server-side so the dashboard never
             # depends on the SDK version (architecture §3.2).
             if isinstance(snapshot.state, dict):
-                snapshot.diff = self._state_differ.diff(previous_state, snapshot.state)
+                snapshot.diff = self._state_differ.diff(previous_state, snapshot.state).to_dict()
                 previous_state = snapshot.state
             await self._snapshots.upsert(snapshot)
 

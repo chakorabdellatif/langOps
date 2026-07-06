@@ -15,11 +15,14 @@ from pydantic import BaseModel
 from langops_api.application.dto import (
     ExecutionDetail,
     ExecutionPage,
+    MetricsOverview,
     NodeDetail,
+    StateEvolution,
     TimelineEntry,
 )
 from langops_api.domain.entities import (
     Execution,
+    Graph,
     LlmCall,
     LogRecord,
     NodeExecution,
@@ -243,7 +246,7 @@ class StateSnapshotResponse(BaseModel):
             node_execution_id=snapshot.node_execution_id,
             kind=snapshot.kind,
             state=snapshot.state,
-            diff=snapshot.diff.to_dict() if snapshot.diff is not None else None,
+            diff=snapshot.diff,
             size_bytes=snapshot.size_bytes,
             message_count=snapshot.message_count,
             created_at=snapshot.created_at,
@@ -288,3 +291,85 @@ class NodeDetailResponse(BaseModel):
             state_snapshots=[StateSnapshotResponse.from_entity(s) for s in detail.state_snapshots],
             logs=[LogResponse.from_entity(r) for r in detail.logs],
         )
+
+
+class GraphResponse(BaseModel):
+    id: UUID
+    name: str
+    topology_hash: str
+    created_at: datetime
+
+    @classmethod
+    def from_entity(cls, graph: Graph) -> GraphResponse:
+        return cls(
+            id=graph.id,
+            name=graph.name,
+            topology_hash=graph.topology_hash,
+            created_at=graph.created_at,
+        )
+
+
+class StateStepResponse(BaseModel):
+    node_execution_id: UUID | None
+    node_name: str | None
+    kind: str
+    state: Any | None
+    diff: dict[str, Any] | None
+    size_bytes: int
+    message_count: int | None
+    created_at: datetime | None
+
+
+class StateEvolutionResponse(BaseModel):
+    steps: list[StateStepResponse]
+    # Context-growth series for the chart: size + message count per step.
+    context_growth: list[dict[str, Any]]
+
+    @classmethod
+    def from_dto(cls, evolution: StateEvolution) -> StateEvolutionResponse:
+        steps = []
+        growth = []
+        for step in evolution.steps:
+            snap = step.snapshot
+            steps.append(
+                StateStepResponse(
+                    node_execution_id=snap.node_execution_id,
+                    node_name=step.node_name,
+                    kind=snap.kind,
+                    state=snap.state,
+                    diff=snap.diff,
+                    size_bytes=snap.size_bytes,
+                    message_count=snap.message_count,
+                    created_at=snap.created_at,
+                )
+            )
+            growth.append(
+                {
+                    "node_name": step.node_name,
+                    "size_bytes": snap.size_bytes,
+                    "message_count": snap.message_count,
+                }
+            )
+        return cls(steps=steps, context_growth=growth)
+
+
+class CostSummaryResponse(BaseModel):
+    total_cost: float
+    total_tokens: int
+    by_model: list[dict[str, Any]]
+    by_day: list[dict[str, Any]]
+
+
+class MetricsOverviewResponse(BaseModel):
+    total_executions: int
+    succeeded: int
+    failed: int
+    running: int
+    failure_rate: float
+    latency_p50_ms: int | None
+    latency_p95_ms: int | None
+    latency_p99_ms: int | None
+
+    @classmethod
+    def from_dto(cls, metrics: MetricsOverview) -> MetricsOverviewResponse:
+        return cls(**metrics.__dict__)
