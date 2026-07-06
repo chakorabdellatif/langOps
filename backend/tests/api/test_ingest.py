@@ -180,3 +180,14 @@ async def test_unknown_execution_returns_404(client: httpx.AsyncClient) -> None:
     response = await client.get("/api/v1/executions/00000000-0000-0000-0000-000000000000")
     assert response.status_code == 404
     assert response.json()["code"] == "execution_not_found"
+
+
+@pytest.mark.asyncio
+async def test_oversized_payload_rejected(client: httpx.AsyncClient) -> None:
+    # Default limit is 4 MiB; exceed it with junk bytes.
+    huge = b"x" * (4_194_304 + 1)
+    response = await client.post(
+        "/v1/traces", content=huge, headers={"content-type": "application/x-protobuf"}
+    )
+    assert response.status_code == 413
+    assert response.json()["code"] == "request_too_large"
