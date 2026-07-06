@@ -1,14 +1,13 @@
-"""initial schema + model pricing seed
+"""initial schema
 
 Revision ID: 0001
 Revises:
 Create Date: 2026-07-06
 
 Full telemetry schema per docs/architecture.md §4. JSONB payloads on Postgres;
-typed columns for everything queried/aggregated. Seeds current model pricing.
+typed columns for everything queried/aggregated. Pricing lives in the JSON
+catalog (infrastructure/pricing/), not the DB (ADR-0002).
 """
-
-from decimal import Decimal
 
 import sqlalchemy as sa
 from alembic import op
@@ -120,7 +119,11 @@ def upgrade() -> None:
         sa.Column("input_tokens", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("output_tokens", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("total_tokens", sa.Integer(), nullable=False, server_default="0"),
-        sa.Column("cost", sa.Numeric(12, 6), nullable=False, server_default="0"),
+        # Cost split by direction; NULL when the model is unpriced (ADR-0002).
+        sa.Column("input_cost", sa.Numeric(12, 6), nullable=True),
+        sa.Column("output_cost", sa.Numeric(12, 6), nullable=True),
+        sa.Column("cost", sa.Numeric(12, 6), nullable=True),
+        sa.Column("cost_status", sa.Text(), nullable=False, server_default="unknown"),
         sa.Column("latency_ms", sa.Integer(), nullable=True),
         sa.Column("started_at", sa.TIMESTAMP(timezone=True), nullable=True),
         sa.Column("error", JSONB, nullable=True),
@@ -204,56 +207,12 @@ def upgrade() -> None:
     op.create_index("ix_logs_execution_timestamp", "logs", ["execution_id", "timestamp"])
     op.create_index("ix_logs_level_timestamp", "logs", ["level", "timestamp"])
 
-    op.create_table(
-        "model_pricing",
-        sa.Column("id", sa.Uuid(), primary_key=True),
-        sa.Column("provider", sa.Text(), nullable=False),
-        sa.Column("model", sa.Text(), nullable=False),
-        sa.Column("input_price_per_1m", sa.Numeric(12, 6), nullable=False),
-        sa.Column("output_price_per_1m", sa.Numeric(12, 6), nullable=False),
-        sa.Column("effective_from", sa.TIMESTAMP(timezone=True), nullable=False),
-        sa.UniqueConstraint("provider", "model", "effective_from", name="uq_model_pricing"),
-    )
-
-    _seed_pricing()
-
-
-def _seed_pricing() -> None:
-    from uuid6 import uuid7
-
-    from langops_api.infrastructure.db.pricing_seed import (
-        DEFAULT_EFFECTIVE_FROM,
-        DEFAULT_PRICING,
-    )
-
-    rows = [
-        {
-            "id": uuid7(),
-            "provider": provider,
-            "model": model,
-            "input_price_per_1m": Decimal(inp),
-            "output_price_per_1m": Decimal(out),
-            "effective_from": DEFAULT_EFFECTIVE_FROM,
-        }
-        for provider, model, inp, out in DEFAULT_PRICING
-    ]
-    op.bulk_insert(
-        sa.table(
-            "model_pricing",
-            sa.column("id", sa.Uuid()),
-            sa.column("provider", sa.Text()),
-            sa.column("model", sa.Text()),
-            sa.column("input_price_per_1m", sa.Numeric(12, 6)),
-            sa.column("output_price_per_1m", sa.Numeric(12, 6)),
-            sa.column("effective_from", sa.TIMESTAMP(timezone=True)),
-        ),
-        rows,
-    )
+    # Pricing is served from the JSON catalog (infrastructure/pricing/), not the
+    # DB — there is no model_pricing table (ADR-0002).
 
 
 def downgrade() -> None:
     for table in (
-        "model_pricing",
         "logs",
         "state_snapshots",
         "tool_calls",

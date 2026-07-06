@@ -123,7 +123,12 @@ async def test_ingest_then_query(client: httpx.AsyncClient) -> None:
 
     node_detail = (await client.get(f"/api/v1/nodes/{node['id']}")).json()
     assert len(node_detail["llm_calls"]) == 1
-    assert node_detail["llm_calls"][0]["model"] == "claude-opus-4-8"
+    call = node_detail["llm_calls"][0]
+    assert call["model"] == "claude-opus-4-8"
+    # Priced from the JSON catalog, split by direction.
+    assert call["cost_status"] == "priced"
+    assert call["total_cost"] == pytest.approx(17.5)
+    assert call["input_cost"] == pytest.approx(5.0)
 
 
 @pytest.mark.asyncio

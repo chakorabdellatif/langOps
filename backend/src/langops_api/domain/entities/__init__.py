@@ -9,8 +9,8 @@ from typing import Any
 from uuid import UUID
 
 from langops_api.domain.value_objects import (
-    ZERO_COST,
     CheckpointRef,
+    Cost,
     ExecutionStatus,
     StateDiff,
     TokenUsage,
@@ -52,7 +52,7 @@ class Execution:
     ended_at: datetime | None = None
     duration_ms: int | None = None
     tokens: TokenUsage = field(default_factory=TokenUsage)
-    total_cost: Decimal = ZERO_COST
+    total_cost: Decimal = Decimal(0)
     sdk_version: str | None = None
 
 
@@ -86,7 +86,7 @@ class LlmCall:
     params: dict[str, Any] | None = None
     response: Any | None = None
     tokens: TokenUsage = field(default_factory=TokenUsage)
-    cost: Decimal = ZERO_COST
+    cost: Cost = field(default_factory=Cost.unknown)
     latency_ms: int | None = None
     started_at: datetime | None = None
     error: dict[str, Any] | None = None
@@ -132,11 +132,11 @@ class LogRecord:
     timestamp: datetime | None = None
 
 
-@dataclass
+@dataclass(frozen=True)
 class ModelPricing:
-    id: UUID
+    """A catalog price for one model (USD per 1M tokens)."""
+
     provider: str
     model: str
     input_price_per_1m: Decimal
     output_price_per_1m: Decimal
-    effective_from: datetime
