@@ -8,6 +8,7 @@ build the same graph against SQLite with a null event publisher.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator, Callable
 
 from fastapi import Depends, Request
@@ -20,8 +21,18 @@ from langops_api.application.services.queries import (
     GetNodeDetailService,
     ListExecutionsService,
 )
+from langops_api.application.services.reports import (
+    GetCostReportService,
+    GetMetricsService,
+    GetStateEvolutionService,
+    ListGraphsService,
+)
 from langops_api.domain.services import CostCalculator, StateDiffer
-from langops_api.infrastructure.cache import NullEventPublisher, RedisEventPublisher
+from langops_api.infrastructure.cache import (
+    EVENTS_CHANNEL,
+    NullEventPublisher,
+    RedisEventPublisher,
+)
 from langops_api.infrastructure.db.repositories import (
     PostgresExecutionRepository,
     PostgresGraphRepository,
@@ -61,6 +72,30 @@ class Container:
         await self.engine.dispose()
         if self.redis is not None:
             await self.redis.aclose()
+
+    async def subscribe_events(self) -> AsyncIterator[str | None]:
+        """Yield each `execution.updated` payload; `None` is a keep-alive tick.
+
+        Bridges the Redis pub/sub channel to the SSE endpoint. Without Redis it
+        just emits keep-alives so the connection stays open.
+        """
+        if self.redis is None:
+            while True:
+                yield None
+                await asyncio.sleep(15)
+        pubsub = self.redis.pubsub()
+        await pubsub.subscribe(EVENTS_CHANNEL)
+        try:
+            while True:
+                message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=15.0)
+                if message is None:
+                    yield None
+                    continue
+                data = message["data"]
+                yield data.decode() if isinstance(data, bytes) else str(data)
+        finally:
+            await pubsub.unsubscribe(EVENTS_CHANNEL)
+            await pubsub.aclose()
 
 
 # ── request-scoped providers ───────────────────────────────────────────
@@ -128,6 +163,43 @@ def get_node_detail_service(
         tool_calls=PostgresToolCallRepository(session),
         snapshots=PostgresStateSnapshotRepository(session),
         logs=PostgresLogRepository(session),
+    )
+
+
+def get_list_graphs_service(
+    session: AsyncSession = Depends(get_session),
+) -> ListGraphsService:
+    return ListGraphsService(
+        projects=PostgresProjectRepository(session),
+        graphs=PostgresGraphRepository(session),
+    )
+
+
+def get_state_evolution_service(
+    session: AsyncSession = Depends(get_session),
+) -> GetStateEvolutionService:
+    return GetStateEvolutionService(
+        executions=PostgresExecutionRepository(session),
+        snapshots=PostgresStateSnapshotRepository(session),
+        nodes=PostgresNodeExecutionRepository(session),
+    )
+
+
+def get_cost_report_service(
+    session: AsyncSession = Depends(get_session),
+) -> GetCostReportService:
+    return GetCostReportService(
+        projects=PostgresProjectRepository(session),
+        llm_calls=PostgresLlmCallRepository(session),
+    )
+
+
+def get_metrics_service(
+    session: AsyncSession = Depends(get_session),
+) -> GetMetricsService:
+    return GetMetricsService(
+        projects=PostgresProjectRepository(session),
+        executions=PostgresExecutionRepository(session),
     )
 
 

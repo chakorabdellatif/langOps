@@ -36,6 +36,8 @@ class GraphRepository(Protocol):
 
     async def get(self, graph_id: UUID) -> Graph | None: ...
 
+    async def list_by_project(self, project_id: UUID) -> list[Graph]: ...
+
 
 class ExecutionRepository(Protocol):
     async def get(self, execution_id: UUID) -> Execution | None: ...
@@ -72,6 +74,16 @@ class ExecutionRepository(Protocol):
         """Return (items ordered by started_at desc, total count)."""
         ...
 
+    async def list_durations(self, project_id: UUID, since: datetime | None = None) -> list[int]:
+        """Completed-execution durations (ms), for latency percentiles."""
+        ...
+
+    async def status_counts(
+        self, project_id: UUID, since: datetime | None = None
+    ) -> dict[str, int]:
+        """Execution count grouped by status."""
+        ...
+
 
 class NodeExecutionRepository(Protocol):
     async def upsert(self, node: NodeExecution) -> NodeExecution: ...
@@ -91,6 +103,14 @@ class LlmCallRepository(Protocol):
     async def list_by_node(self, node_execution_id: UUID) -> list[LlmCall]: ...
 
     async def sum_usage(self, execution_id: UUID) -> tuple[TokenUsage, Decimal]: ...
+
+    async def cost_by_model(self, project_id: UUID) -> list[dict[str, Any]]:
+        """Per-model rollup: provider, model, tokens, cost, calls, unknown count."""
+        ...
+
+    async def cost_by_day(self, project_id: UUID) -> list[dict[str, Any]]:
+        """Per-day total cost (UTC), oldest first."""
+        ...
 
 
 class ToolCallRepository(Protocol):

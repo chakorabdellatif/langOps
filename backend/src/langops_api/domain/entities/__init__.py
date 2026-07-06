@@ -12,7 +12,6 @@ from langops_api.domain.value_objects import (
     CheckpointRef,
     Cost,
     ExecutionStatus,
-    StateDiff,
     TokenUsage,
 )
 
@@ -114,7 +113,8 @@ class StateSnapshot:
     kind: str  # "input" | "output"
     node_execution_id: UUID | None = None
     state: Any | None = None
-    diff: StateDiff | None = None
+    # {added, modified, removed}; recomputed server-side, stored as JSON.
+    diff: dict[str, Any] | None = None
     size_bytes: int = 0
     message_count: int | None = None
     created_at: datetime | None = None
