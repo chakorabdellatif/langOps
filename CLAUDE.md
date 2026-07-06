@@ -12,7 +12,12 @@ The MVP focuses on **observability, not orchestration**. Features like prompt ve
 
 ## Current Status
 
-No source code has been committed yet. The full Architecture Design Document lives at `docs/architecture.md` — it is the implementation blueprint (services, monorepo layout, backend layering, database schema, SDK instrumentation strategy, dashboard architecture, Docker topology, milestones, conventions). Consult it before implementing anything, and update this file as components are actually implemented.
+The monorepo skeleton is scaffolded (packages, configs, CI, Docker/Compose, docs), but feature code is not yet implemented — most Python modules are docstring stubs. Two documents drive all work:
+
+- `docs/architecture.md` — the implementation blueprint (services, monorepo layout, backend layering, database schema, SDK instrumentation strategy, dashboard architecture, Docker topology, conventions). Consult it before implementing anything.
+- `tasks.md` — the phased build plan (Phase 1–8, mapped to the architecture milestones) with acceptance criteria. Work phases in order and keep checkbox statuses current.
+
+`docs/semantic-conventions.md` is the SDK↔backend contract (the `langops.*` / `gen_ai.*` OTel attribute namespace); it is mirrored in `sdk/src/langops/semconv.py` and must never drift. Backend layering (`presentation → application → domain ← infrastructure`) is enforced by import-linter contracts in `backend/pyproject.toml`.
 
 ## Architecture
 
