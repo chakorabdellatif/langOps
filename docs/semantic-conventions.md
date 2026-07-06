@@ -20,6 +20,16 @@ Rules:
 4. Breaking changes require a `feat(semconv)!:` commit and a version bump of
    this document.
 
+### Payload encoding
+
+Every payload-bearing span event (state, messages, params, response, tool
+input/output, topology, execution input/output) carries its body as a JSON
+string under a single event attribute, **`langops.payload`**. The backend reads
+`event.attributes["langops.payload"]` and `json`-decodes it. Payloads are
+redacted, then size-capped at `max_payload_bytes`; when a payload exceeds the
+cap the event carries `langops.truncated = true` and `langops.payload` is a
+small marker (`{"langops.truncated": true}`) instead of the oversized body.
+
 ---
 
 ## Resource attributes
@@ -78,12 +88,16 @@ Span events:
 |---|---|---|
 | `langops.state.input` | JSON | Node input state |
 | `langops.state.output` | JSON | Node output state |
-| `langops.state.diff` | JSON `{added, modified, removed}` | Structural diff vs previous snapshot |
-| `langops.state.snapshot` | JSON + `langops.checkpoint.id` attrs | Emitted by the checkpointer wrapper on `put()` |
+| `langops.state.diff` | JSON `{added, modified, removed}` | Structural diff (recomputed server-side; SDK may omit) |
+| `langops.state.snapshot` | JSON + `langops.checkpoint.id` attrs | Reserved for the richer checkpointer snapshot in Phase 6 |
 
 State events also carry `langops.state.size_bytes` (int) and
 `langops.state.message_count` (int, when derivable) for the context-growth
 series.
+
+The checkpointer wrapper currently feeds **authoritative checkpoint lineage**
+(`langops.checkpoint.id` / `.parent_id`) onto the execution span from each
+`put()`; per-checkpoint state snapshot events are a Phase 6 addition.
 
 ## LLM spans (`langops.kind = llm`)
 

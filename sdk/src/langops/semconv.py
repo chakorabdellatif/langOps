@@ -68,4 +68,8 @@ EVENT_TOOL_INPUT = "langops.tool.input"
 EVENT_TOOL_OUTPUT = "langops.tool.output"
 
 # ── Cross-cutting ──────────────────────────────────────────────────────
+# Every payload span event carries its JSON body under this event attribute
+# (backend reads and json-decodes it). Large payloads ride as events, not
+# span attributes, per the OTLP size conventions.
+PAYLOAD = "langops.payload"
 TRUNCATED = "langops.truncated"
