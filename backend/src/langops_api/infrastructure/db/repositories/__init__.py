@@ -21,19 +21,23 @@ from langops_api.domain.entities import (
     Graph,
     LlmCall,
     LogRecord,
-    ModelPricing,
     NodeExecution,
     Project,
     StateSnapshot,
     ToolCall,
 )
-from langops_api.domain.value_objects import CheckpointRef, ExecutionStatus, TokenUsage
+from langops_api.domain.value_objects import (
+    CheckpointRef,
+    Cost,
+    CostStatus,
+    ExecutionStatus,
+    TokenUsage,
+)
 from langops_api.infrastructure.db.models import (
     ExecutionModel,
     GraphModel,
     LlmCallModel,
     LogModel,
-    ModelPricingModel,
     NodeExecutionModel,
     ProjectModel,
     StateSnapshotModel,
@@ -97,7 +101,12 @@ def _llm_to_entity(row: LlmCallModel) -> LlmCall:
         params=row.params,
         response=row.response,
         tokens=TokenUsage(row.input_tokens, row.output_tokens),
-        cost=Decimal(row.cost or 0),
+        cost=Cost(
+            input_cost=Decimal(row.input_cost) if row.input_cost is not None else None,
+            output_cost=Decimal(row.output_cost) if row.output_cost is not None else None,
+            total_cost=Decimal(row.cost) if row.cost is not None else None,
+            status=CostStatus(row.cost_status),
+        ),
         latency_ms=row.latency_ms,
         started_at=row.started_at,
         error=row.error,
@@ -379,7 +388,10 @@ class PostgresLlmCallRepository:
         row.input_tokens = call.tokens.input_tokens
         row.output_tokens = call.tokens.output_tokens
         row.total_tokens = call.tokens.total_tokens
-        row.cost = call.cost
+        row.input_cost = call.cost.input_cost
+        row.output_cost = call.cost.output_cost
+        row.cost = call.cost.total_cost
+        row.cost_status = call.cost.status.value
         row.latency_ms = call.latency_ms if call.latency_ms is not None else row.latency_ms
         row.started_at = call.started_at or row.started_at
         row.error = call.error if call.error is not None else row.error
@@ -539,28 +551,5 @@ class PostgresLogRepository:
         return [_log_to_entity(r) for r in rows]
 
 
-class PostgresPricingRepository:
-    def __init__(self, session: AsyncSession) -> None:
-        self._session = session
-
-    async def get_price(self, provider: str, model: str, at: datetime) -> ModelPricing | None:
-        row = await self._session.scalar(
-            sa.select(ModelPricingModel)
-            .where(
-                ModelPricingModel.provider == provider,
-                ModelPricingModel.model == model,
-                ModelPricingModel.effective_from <= at,
-            )
-            .order_by(ModelPricingModel.effective_from.desc())
-            .limit(1)
-        )
-        if row is None:
-            return None
-        return ModelPricing(
-            id=row.id,
-            provider=row.provider,
-            model=row.model,
-            input_price_per_1m=Decimal(row.input_price_per_1m),
-            output_price_per_1m=Decimal(row.output_price_per_1m),
-            effective_from=row.effective_from,
-        )
+# Pricing is served from the JSON catalog (infrastructure/pricing/), not the DB
+# (ADR-0002). See CatalogPricingRepository.

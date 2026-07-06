@@ -20,5 +20,9 @@ class Settings(BaseSettings):
     ingest_max_payload_bytes: int = 4_194_304
     ingest_max_batch_spans: int = 2_048
 
+    # Optional directory of extra pricing JSON files (ADR-0002); extends the
+    # built-in catalog for custom/self-hosted models.
+    pricing_catalog_dir: str | None = None
+
     # Create tables at startup instead of via Alembic (tests/dev only).
     db_create_tables: bool = False

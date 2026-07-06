@@ -32,14 +32,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         container = Container(settings)
         if settings.db_create_tables:
-            # Test/dev convenience; real deployments migrate + seed via Alembic.
+            # Test/dev convenience; real deployments migrate via Alembic.
+            # Pricing needs no seeding — it loads from the JSON catalog (ADR-0002).
             from langops_api.infrastructure.db.models import Base
-            from langops_api.infrastructure.db.pricing_seed import seed_pricing
 
             async with container.engine.begin() as conn:
                 await conn.run_sync(Base.metadata.create_all)
-            async with container.session_factory() as session:
-                await seed_pricing(session)
         app.state.container = container
         yield
         await container.dispose()

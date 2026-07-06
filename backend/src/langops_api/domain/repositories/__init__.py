@@ -118,6 +118,6 @@ class LogRepository(Protocol):
 
 
 class PricingRepository(Protocol):
-    async def get_price(self, provider: str, model: str, at: datetime) -> ModelPricing | None:
-        """Latest pricing row with effective_from <= at."""
+    async def get_price(self, provider: str, model: str) -> ModelPricing | None:
+        """Catalog price for a model, or None when unpriced (ADR-0002)."""
         ...

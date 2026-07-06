@@ -168,13 +168,17 @@ class LlmCallResponse(BaseModel):
     input_tokens: int
     output_tokens: int
     total_tokens: int
-    cost: float
+    input_cost: float | None
+    output_cost: float | None
+    total_cost: float | None
+    cost_status: str
     latency_ms: int | None
     started_at: datetime | None
     error: dict[str, Any] | None
 
     @classmethod
     def from_entity(cls, call: LlmCall) -> LlmCallResponse:
+        cost = call.cost
         return cls(
             id=call.id,
             node_execution_id=call.node_execution_id,
@@ -186,7 +190,10 @@ class LlmCallResponse(BaseModel):
             input_tokens=call.tokens.input_tokens,
             output_tokens=call.tokens.output_tokens,
             total_tokens=call.tokens.total_tokens,
-            cost=float(call.cost),
+            input_cost=float(cost.input_cost) if cost.input_cost is not None else None,
+            output_cost=float(cost.output_cost) if cost.output_cost is not None else None,
+            total_cost=float(cost.total_cost) if cost.total_cost is not None else None,
+            cost_status=cost.status.value,
             latency_ms=call.latency_ms,
             started_at=call.started_at,
             error=call.error,

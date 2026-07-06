@@ -124,7 +124,11 @@ class LlmCallModel(Base):
     input_tokens: Mapped[int] = mapped_column(sa.Integer, default=0)
     output_tokens: Mapped[int] = mapped_column(sa.Integer, default=0)
     total_tokens: Mapped[int] = mapped_column(sa.Integer, default=0)
-    cost: Mapped[Decimal] = mapped_column(sa.Numeric(12, 6), default=Decimal("0"))
+    # Cost split by direction; NULL when the model is unpriced (ADR-0002).
+    input_cost: Mapped[Decimal | None] = mapped_column(sa.Numeric(12, 6), nullable=True)
+    output_cost: Mapped[Decimal | None] = mapped_column(sa.Numeric(12, 6), nullable=True)
+    cost: Mapped[Decimal | None] = mapped_column(sa.Numeric(12, 6), nullable=True)
+    cost_status: Mapped[str] = mapped_column(sa.Text, default="unknown")
     latency_ms: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(sa.TIMESTAMP(timezone=True), nullable=True)
     error: Mapped[Any | None] = mapped_column(JSONType, nullable=True)
@@ -193,15 +197,5 @@ class LogModel(Base):
     timestamp: Mapped[datetime | None] = mapped_column(sa.TIMESTAMP(timezone=True), nullable=True)
 
 
-class ModelPricingModel(Base):
-    __tablename__ = "model_pricing"
-    __table_args__ = (
-        sa.UniqueConstraint("provider", "model", "effective_from", name="uq_model_pricing"),
-    )
-
-    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True)
-    provider: Mapped[str] = mapped_column(sa.Text)
-    model: Mapped[str] = mapped_column(sa.Text)
-    input_price_per_1m: Mapped[Decimal] = mapped_column(sa.Numeric(12, 6))
-    output_price_per_1m: Mapped[Decimal] = mapped_column(sa.Numeric(12, 6))
-    effective_from: Mapped[datetime] = mapped_column(sa.TIMESTAMP(timezone=True))
+# Model pricing lives in the JSON catalog (infrastructure/pricing/), not the DB
+# (ADR-0002) — there is no model_pricing table.

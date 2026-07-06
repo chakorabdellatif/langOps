@@ -15,6 +15,11 @@ class ExecutionStatus(StrEnum):
     INTERRUPTED = "interrupted"
 
 
+class CostStatus(StrEnum):
+    PRICED = "priced"
+    UNKNOWN = "unknown"  # no catalog entry — never priced at $0 (ADR-0002)
+
+
 @dataclass(frozen=True)
 class TokenUsage:
     input_tokens: int = 0
@@ -55,6 +60,24 @@ class CheckpointRef:
     checkpoint_id: str | None = None
     parent_checkpoint_id: str | None = None
     resumed: bool = False
+
+
+@dataclass(frozen=True)
+class Cost:
+    """Computed cost of an LLM call, split by direction.
+
+    ``status == UNKNOWN`` means the model was not in the pricing catalog; the
+    amounts are ``None`` (not zero) so the dashboard can show "Unknown".
+    """
+
+    input_cost: Decimal | None = None
+    output_cost: Decimal | None = None
+    total_cost: Decimal | None = None
+    status: CostStatus = CostStatus.UNKNOWN
+
+    @classmethod
+    def unknown(cls) -> Cost:
+        return cls(status=CostStatus.UNKNOWN)
 
 
 ZERO_COST = Decimal("0")
