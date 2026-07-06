@@ -82,6 +82,22 @@ Automatically calculate:
 
 ---
 
+## Context & State Observation
+
+LangOps provides deep visibility into how the **LangGraph State** evolves during execution.
+
+For every node, it captures:
+
+- Initial and final state
+- State diff (added, modified, removed values)
+- Context growth (messages, memory, retrieved documents)
+- Thread and checkpoint information
+- Whether the execution started fresh or resumed from a previous checkpoint
+
+This allows developers to understand exactly how each agent contributes to the workflow and how context evolves across the graph.
+
+---
+
 ## Execution Dashboard
 
 View:
