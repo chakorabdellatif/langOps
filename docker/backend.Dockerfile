@@ -1,5 +1,5 @@
 # langops-api — FastAPI backend
-FROM python:3.12-slim AS base
+FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -7,17 +7,16 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# Install dependencies first for layer caching.
+# The package uses a src/ layout, so the source must be present for the build.
 COPY backend/pyproject.toml backend/README.md ./
+COPY backend/src ./src
 RUN pip install .
 
-# Then the source and migrations.
-COPY backend/src ./src
+# Migrations run at container start (not baked into the image).
 COPY backend/alembic.ini ./alembic.ini
 COPY backend/alembic ./alembic
-RUN pip install --no-deps .
 
 EXPOSE 8000
 
-# Apply migrations, then serve.
+# Apply migrations (idempotent), then serve.
 CMD ["sh", "-c", "alembic upgrade head && uvicorn langops_api.main:app --host 0.0.0.0 --port 8000"]

@@ -43,6 +43,18 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
+    healthcheck:
+      # python is in the image; curl is not. Non-200 raises → unhealthy.
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health')",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 20
     networks: [langops]
 
   otel-collector:
@@ -53,7 +65,8 @@ services:
     ports:
       - "4317:4317" # OTLP gRPC  <- instrumented apps on the host
       - "4318:4318" # OTLP HTTP  <- instrumented apps on the host
-    depends_on: [api]
+    depends_on:
+      api: { condition: service_healthy }
     networks: [langops]
 
   dashboard:
@@ -64,7 +77,8 @@ services:
       NEXT_PUBLIC_API_URL: http://localhost:8000
     ports:
       - "3000:3000"
-    depends_on: [api]
+    depends_on:
+      api: { condition: service_healthy }
     networks: [langops]
 
 networks:

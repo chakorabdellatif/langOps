@@ -1,7 +1,7 @@
 # LangOps development entrypoints.
 # Requires: docker compose v2, Python 3.12 + uv (or pip), Node 20+.
 
-.PHONY: up down reset logs lint test fmt migrate \
+.PHONY: up down reset logs e2e lint test fmt migrate \
         lint-sdk lint-backend lint-dashboard \
         test-sdk test-backend test-dashboard
 
@@ -18,6 +18,9 @@ reset:         ## Stop the stack and wipe all data (Postgres volume)
 
 logs:          ## Tail logs from all services
 	docker compose logs -f
+
+e2e:           ## Full pipeline smoke test (compose up, run example, verify)
+	bash scripts/e2e-smoke.sh
 
 ## ── Quality gates (aggregate) ────────────────────────────────────────
 
