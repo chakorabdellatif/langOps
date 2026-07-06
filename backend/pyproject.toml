@@ -44,6 +44,8 @@ src = ["src", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
+# B008: FastAPI's Depends()/Query() in argument defaults is the intended idiom.
+ignore = ["B008"]
 
 [tool.mypy]
 mypy_path = "src"
@@ -83,3 +85,8 @@ name = "Presentation never imports infrastructure directly"
 type = "forbidden"
 source_modules = ["langops_api.presentation"]
 forbidden_modules = ["langops_api.infrastructure"]
+# The composition root (langops_api.composition) is the single DI bridge that
+# legitimately wires infrastructure into the app; routers reach infrastructure
+# only through its Depends() providers, never directly. This contract enforces
+# the "directly" — the transitive path through composition is by design.
+allow_indirect_imports = "true"

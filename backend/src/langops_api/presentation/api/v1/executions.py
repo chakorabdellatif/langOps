@@ -1,0 +1,69 @@
+"""Execution query endpoints."""
+
+from __future__ import annotations
+
+from datetime import datetime
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, Query
+
+from langops_api.application.services.queries import (
+    GetExecutionDetailService,
+    ListExecutionsService,
+)
+from langops_api.composition import get_execution_detail_service, get_list_executions_service
+from langops_api.presentation.schemas import (
+    ExecutionDetailResponse,
+    ExecutionListResponse,
+    LogResponse,
+    TimelineEntryResponse,
+)
+
+router = APIRouter(prefix="/executions", tags=["executions"])
+
+
+@router.get("", response_model=ExecutionListResponse)
+async def list_executions(
+    status: str | None = Query(default=None),
+    graph_id: UUID | None = Query(default=None),
+    thread_id: str | None = Query(default=None),
+    since: datetime | None = Query(default=None),
+    until: datetime | None = Query(default=None),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    service: ListExecutionsService = Depends(get_list_executions_service),
+) -> ExecutionListResponse:
+    result = await service.list(
+        status=status,
+        graph_id=graph_id,
+        thread_id=thread_id,
+        since=since,
+        until=until,
+        page=page,
+        page_size=page_size,
+    )
+    return ExecutionListResponse.from_dto(result)
+
+
+@router.get("/{execution_id}", response_model=ExecutionDetailResponse)
+async def get_execution(
+    execution_id: UUID,
+    service: GetExecutionDetailService = Depends(get_execution_detail_service),
+) -> ExecutionDetailResponse:
+    return ExecutionDetailResponse.from_dto(await service.get(execution_id))
+
+
+@router.get("/{execution_id}/timeline", response_model=list[TimelineEntryResponse])
+async def get_execution_timeline(
+    execution_id: UUID,
+    service: GetExecutionDetailService = Depends(get_execution_detail_service),
+) -> list[TimelineEntryResponse]:
+    return [TimelineEntryResponse.from_dto(e) for e in await service.timeline(execution_id)]
+
+
+@router.get("/{execution_id}/logs", response_model=list[LogResponse])
+async def get_execution_logs(
+    execution_id: UUID,
+    service: GetExecutionDetailService = Depends(get_execution_detail_service),
+) -> list[LogResponse]:
+    return [LogResponse.from_entity(r) for r in await service.logs(execution_id)]

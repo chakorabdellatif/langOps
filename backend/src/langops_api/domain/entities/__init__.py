@@ -1,0 +1,142 @@
+"""Domain entities — plain dataclasses, no ORM, no framework imports."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from datetime import datetime
+from decimal import Decimal
+from typing import Any
+from uuid import UUID
+
+from langops_api.domain.value_objects import (
+    ZERO_COST,
+    CheckpointRef,
+    ExecutionStatus,
+    StateDiff,
+    TokenUsage,
+)
+
+
+@dataclass
+class Project:
+    id: UUID
+    name: str
+    slug: str
+    created_at: datetime
+
+
+@dataclass
+class Graph:
+    id: UUID
+    project_id: UUID
+    name: str
+    topology: dict[str, Any] | None
+    topology_hash: str
+    created_at: datetime
+
+
+@dataclass
+class Execution:
+    """One end-to-end graph run (≙ one OTel trace)."""
+
+    id: UUID
+    project_id: UUID
+    trace_id: str
+    graph_id: UUID | None = None
+    status: ExecutionStatus = ExecutionStatus.RUNNING
+    checkpoint: CheckpointRef = field(default_factory=CheckpointRef)
+    error: dict[str, Any] | None = None
+    input: Any | None = None
+    output: Any | None = None
+    started_at: datetime | None = None
+    ended_at: datetime | None = None
+    duration_ms: int | None = None
+    tokens: TokenUsage = field(default_factory=TokenUsage)
+    total_cost: Decimal = ZERO_COST
+    sdk_version: str | None = None
+
+
+@dataclass
+class NodeExecution:
+    """One node run within an execution (≙ one OTel span)."""
+
+    id: UUID
+    execution_id: UUID
+    span_id: str
+    node_name: str
+    parent_span_id: str | None = None
+    sequence: int = 0
+    status: ExecutionStatus = ExecutionStatus.SUCCEEDED
+    retry_count: int = 0
+    error: dict[str, Any] | None = None
+    started_at: datetime | None = None
+    ended_at: datetime | None = None
+    duration_ms: int | None = None
+
+
+@dataclass
+class LlmCall:
+    id: UUID
+    execution_id: UUID
+    span_id: str
+    node_execution_id: UUID | None = None
+    provider: str | None = None
+    model: str | None = None
+    messages: Any | None = None
+    params: dict[str, Any] | None = None
+    response: Any | None = None
+    tokens: TokenUsage = field(default_factory=TokenUsage)
+    cost: Decimal = ZERO_COST
+    latency_ms: int | None = None
+    started_at: datetime | None = None
+    error: dict[str, Any] | None = None
+
+
+@dataclass
+class ToolCall:
+    id: UUID
+    execution_id: UUID
+    span_id: str
+    tool_name: str
+    node_execution_id: UUID | None = None
+    input: Any | None = None
+    output: Any | None = None
+    status: ExecutionStatus = ExecutionStatus.SUCCEEDED
+    error: dict[str, Any] | None = None
+    duration_ms: int | None = None
+    started_at: datetime | None = None
+
+
+@dataclass
+class StateSnapshot:
+    id: UUID
+    execution_id: UUID
+    kind: str  # "input" | "output"
+    node_execution_id: UUID | None = None
+    state: Any | None = None
+    diff: StateDiff | None = None
+    size_bytes: int = 0
+    message_count: int | None = None
+    created_at: datetime | None = None
+
+
+@dataclass
+class LogRecord:
+    id: UUID
+    execution_id: UUID
+    level: str
+    message: str
+    node_execution_id: UUID | None = None
+    stack_trace: str | None = None
+    attributes: dict[str, Any] | None = None
+    timestamp: datetime | None = None
+
+
+@dataclass
+class ModelPricing:
+    id: UUID
+    provider: str
+    model: str
+    input_price_per_1m: Decimal
+    output_price_per_1m: Decimal
+    effective_from: datetime

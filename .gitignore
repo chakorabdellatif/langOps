@@ -53,3 +53,7 @@ Thumbs.db
 
 # --- Claude Code local settings ---
 .claude/settings.local.json
+
+# Local venvs
+backend/.venv/
+sdk/.venv/

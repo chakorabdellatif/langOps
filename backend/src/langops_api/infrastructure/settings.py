@@ -19,3 +19,6 @@ class Settings(BaseSettings):
     # Ingestion limits
     ingest_max_payload_bytes: int = 4_194_304
     ingest_max_batch_spans: int = 2_048
+
+    # Create tables at startup instead of via Alembic (tests/dev only).
+    db_create_tables: bool = False
