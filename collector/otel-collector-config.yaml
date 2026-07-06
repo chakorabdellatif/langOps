@@ -1,0 +1,43 @@
+# OpenTelemetry Collector configuration for the LangOps local stack.
+# Receives OTLP from instrumented LangGraph apps (host: localhost:4317/4318)
+# and forwards to the langops-api ingestion endpoint.
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 256
+    spike_limit_mib: 64
+  batch:
+    send_batch_size: 512
+    send_batch_max_size: 1024
+    timeout: 2s
+
+exporters:
+  otlphttp/langops:
+    # Inside the compose network the API is reachable by service name.
+    endpoint: http://api:8000
+    tls:
+      insecure: true
+    retry_on_failure:
+      enabled: true
+      initial_interval: 1s
+      max_interval: 30s
+      max_elapsed_time: 300s
+    sending_queue:
+      enabled: true
+      queue_size: 2048
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [otlphttp/langops]
