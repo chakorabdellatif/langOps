@@ -7,9 +7,11 @@ execution rollups, and publishes execution.updated events.
 
 from __future__ import annotations
 
-import logging
 from typing import Any, Protocol
 from uuid import UUID
+
+import structlog
+from structlog.contextvars import bind_contextvars, clear_contextvars
 
 from langops_api.application.mappers.otlp_mapper import MappedTrace, map_spans
 from langops_api.domain.repositories import (
@@ -26,7 +28,7 @@ from langops_api.domain.repositories import (
 from langops_api.domain.services import CostCalculator, StateDiffer
 from langops_api.infrastructure.otlp import ParsedSpan
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger("langops_api.ingest")
 
 
 class EventPublisher(Protocol):
@@ -71,8 +73,20 @@ class IngestTelemetryService:
         return len(traces)
 
     async def _ingest_trace(self, project_id: UUID, trace: MappedTrace) -> None:
+        try:
+            await self._persist_trace(project_id, trace)
+        finally:
+            clear_contextvars()
+
+    async def _persist_trace(self, project_id: UUID, trace: MappedTrace) -> None:
         execution = trace.execution
         execution.project_id = project_id
+        checkpoint = execution.checkpoint
+        bind_contextvars(
+            trace_id=trace.trace_id,
+            thread_id=checkpoint.thread_id,
+            checkpoint_id=checkpoint.checkpoint_id,
+        )
 
         if trace.graph is not None:
             graph = await self._graphs.get_or_create(
@@ -84,6 +98,7 @@ class IngestTelemetryService:
         # the root span enriches it when it lands.
         stored = await self._executions.upsert(execution, enrich_only=not trace.has_root_span)
         execution_id = stored.id
+        bind_contextvars(execution_id=str(execution_id))
 
         # Nodes first so children can link to them; remember span_id -> node id.
         node_ids: dict[str, UUID] = {}
@@ -141,4 +156,10 @@ class IngestTelemetryService:
 
         await self._publisher.publish(
             {"type": "execution.updated", "execution_id": str(execution_id)}
+        )
+        logger.info(
+            "trace_ingested",
+            nodes=len(trace.nodes),
+            llm_calls=len(trace.llm_calls),
+            tool_calls=len(trace.tool_calls),
         )

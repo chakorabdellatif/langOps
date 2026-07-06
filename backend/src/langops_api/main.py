@@ -2,16 +2,22 @@
 
 from __future__ import annotations
 
-import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
+import structlog
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from langops_api.composition import Container
-from langops_api.domain.errors import InvalidTelemetry, LangOpsError, NotFoundError
+from langops_api.domain.errors import (
+    InvalidTelemetry,
+    LangOpsError,
+    NotFoundError,
+    RequestTooLarge,
+)
+from langops_api.infrastructure.logging_config import configure_logging
 from langops_api.infrastructure.settings import Settings
 from langops_api.presentation.api.v1.costs import router as costs_router
 from langops_api.presentation.api.v1.executions import router as executions_router
@@ -22,15 +28,12 @@ from langops_api.presentation.api.v1.nodes import router as nodes_router
 from langops_api.presentation.events import router as events_router
 from langops_api.presentation.ingest import router as ingest_router
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger("langops_api")
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings()
-    logging.basicConfig(
-        level=settings.log_level.upper(),
-        format="%(asctime)s %(levelname)s %(name)s %(message)s",
-    )
+    configure_logging(settings.log_level)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -70,12 +73,28 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             content={"code": exc.code, "message": exc.message, "detail": exc.detail},
         )
 
+    @app.exception_handler(RequestTooLarge)
+    async def too_large_handler(request: Request, exc: RequestTooLarge) -> JSONResponse:
+        return JSONResponse(
+            status_code=413,
+            content={"code": exc.code, "message": exc.message, "detail": exc.detail},
+        )
+
     @app.exception_handler(LangOpsError)
     async def langops_error_handler(request: Request, exc: LangOpsError) -> JSONResponse:
-        logger.exception("unhandled LangOpsError", exc_info=exc)
+        logger.error("langops_error", code=exc.code, message=exc.message)
         return JSONResponse(
             status_code=500,
             content={"code": exc.code, "message": exc.message, "detail": exc.detail},
+        )
+
+    @app.exception_handler(Exception)
+    async def unhandled_handler(request: Request, exc: Exception) -> JSONResponse:
+        # Log the full trace server-side; never expose it over the API.
+        logger.exception("unhandled_exception", error_type=type(exc).__name__)
+        return JSONResponse(
+            status_code=500,
+            content={"code": "internal_error", "message": "Internal server error", "detail": None},
         )
 
     app.include_router(health_router, prefix="/api/v1")

@@ -28,3 +28,9 @@ class InvalidTelemetry(LangOpsError):
     """Malformed OTLP payload — maps to HTTP 400, never 500."""
 
     code = "invalid_telemetry"
+
+
+class RequestTooLarge(LangOpsError):
+    """OTLP payload exceeds the configured size limit — maps to HTTP 413."""
+
+    code = "request_too_large"
