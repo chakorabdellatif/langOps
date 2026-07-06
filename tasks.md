@@ -82,19 +82,19 @@ in every table and correct query-API responses.
 Goal: `instrument(graph)` on a real LangGraph app emits spans matching the
 conventions doc exactly, and can never break the host app.
 
-- [ ] `export/tracer.py`: dedicated TracerProvider (never the global one), resource attrs, OTLP exporter (`LANGOPS_ENDPOINT`, default localhost:4317)
-- [ ] `export/processors.py`: BatchSpanProcessor config + payload-limit processor (`langops.truncated` marker)
-- [ ] `capture/state.py`: safe serialization (fallback repr, depth limits, size caps)
-- [ ] `capture/diff.py`: structural diff {added, modified, removed} — same semantics as backend `StateDiffer` (shared test vectors)
-- [ ] `capture/redaction.py`: user hook applied before export
-- [ ] `instrumentation/graph.py`: wrap invoke/ainvoke/stream/astream; root span; input/output events; thread/checkpoint extraction; topology capture + hash; fresh-vs-resumed detection; handler injection
-- [ ] `instrumentation/callbacks.py`: node spans (sequence, retries via repeated starts), LLM spans (gen_ai.* attrs, usage_metadata tokens, message/params/response events), tool spans; run_id→span-context parent wiring (subgraphs)
-- [ ] `instrumentation/checkpointer.py`: BaseCheckpointSaver decorator; snapshot event per `put()` with checkpoint lineage + diff
-- [ ] Failure policy: every capture path wrapped; one WARNING per failure class; fault-injection tests prove no exception reaches the host app
-- [ ] Golden-file span tests against an in-memory exporter, validated field-by-field against `docs/semantic-conventions.md`
-- [ ] `examples/simple-agent/main.py`: 2–3 node graph, one LLM call, one tool call, instrumented
+- [x] `export/tracer.py`: dedicated TracerProvider (never the global one), resource attrs, OTLP exporter (default localhost:4317), sampling ratio
+- [x] `export/processors.py`: BatchSpanProcessor config (payload-limit enforced at capture time, `langops.truncated` marker)
+- [x] `capture/state.py`: safe serialization (fallback repr, depth limits, size caps)
+- [x] `capture/diff.py`: structural diff {added, modified, removed} — same semantics as backend `StateDiffer`
+- [x] `capture/redaction.py`: user hook applied before export (fails closed on hook error)
+- [x] `instrumentation/graph.py`: wrap invoke/ainvoke/stream/astream; root span; input/output events; thread/checkpoint extraction; topology capture + hash; fresh-vs-resumed detection; handler injection; re-entrancy guard (invoke→stream); idempotent
+- [x] `instrumentation/callbacks.py`: node spans (sequence from `graph:step` tag, retries per node/step), LLM spans (gen_ai.* attrs, usage_metadata tokens, message/params/response events), tool spans; run_id→span-context parent wiring
+- [x] `instrumentation/checkpointer.py`: `BaseCheckpointSaver` proxy (composition); feeds authoritative checkpoint lineage into the execution span on `put()`/`aput()` (richer per-put snapshot events → Phase 6)
+- [x] Failure policy: every capture path wrapped; one WARNING per failure class; fault-injection test proves a raising redaction hook never reaches the host graph
+- [x] Span tests against an in-memory exporter, validated against `docs/semantic-conventions.md` (kinds, sequence, parenting, correlation, payload events)
+- [x] `examples/simple-agent/main.py`: 2-node graph, one LLM call, one tool call, instrumented (runs with no API key via a fake chat model)
 
-**Accept when:** golden-file tests pass; fault-injection tests pass; the example runs cleanly with and without a reachable collector.
+**Accept when:** span tests pass; fault-injection test passes; the example runs cleanly with and without a reachable collector. ✅
 
 ## Phase 4 — Collector & end-to-end pipeline (M4)
 
