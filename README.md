@@ -302,23 +302,47 @@ docker compose up --build
 
 # Instrumenting a LangGraph Application
 
-Install the SDK:
+Install the SDK (from source during development):
 
 ```bash
-pip install langops
+pip install -e ./sdk        # published as `langops` on PyPI at 0.1.0
 ```
 
-Enable monitoring:
+Wrap your compiled graph — one line, no other changes:
 
 ```python
 from langops import instrument
 
-instrument(graph)
-
-graph.invoke(...)
+graph = instrument(graph)   # wraps invoke/ainvoke/stream/astream in place
+graph.invoke(..., config={"configurable": {"thread_id": "abc"}})
 ```
 
-Once enabled, every graph execution is automatically captured and appears in the LangOps dashboard.
+Spans export via OpenTelemetry to the Collector (default `http://localhost:4317`;
+override with `LangOpsConfig(endpoint=...)`). Every execution — node transitions,
+LLM calls, tokens, state diffs — is captured and appears in the dashboard.
+Instrumentation is fault-isolated: if telemetry ever errors, your graph still
+runs unaffected.
+
+---
+
+# Try it end-to-end
+
+With the stack running, run the bundled example on the host and watch it appear:
+
+```bash
+docker compose up --build            # terminal 1: the full stack
+pip install -e ./sdk                 # terminal 2
+python examples/simple-agent/main.py # emits an execution to the Collector
+open http://localhost:3000           # the run shows up in the dashboard
+```
+
+Or run the automated acceptance check (builds the stack, runs the example,
+verifies the execution is queryable, and tests Collector-retry resilience by
+killing the API mid-run):
+
+```bash
+make e2e        # bash scripts/e2e-smoke.sh
+```
 
 ---
 

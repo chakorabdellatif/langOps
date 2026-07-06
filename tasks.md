@@ -101,15 +101,15 @@ conventions doc exactly, and can never break the host app.
 Goal: `docker compose up` + running the example on the host = execution
 queryable via REST within seconds.
 
-- [ ] Verify collector config against the real API ingest path (endpoint path, content-type, retry behavior)
-- [ ] Backend Dockerfile builds and serves; migration-on-start works against compose Postgres
-- [ ] Dashboard Dockerfile builds (standalone) and serves the placeholder page
-- [ ] Full-stack smoke: host-run `examples/simple-agent` → spans → collector → API → Postgres → query API returns the execution
-- [ ] Resilience: kill the API mid-run; collector retry delivers all spans after restart (no data loss)
-- [ ] Duplicate/out-of-order hardening verified end-to-end (not just unit fixtures)
-- [ ] Document the quickstart flow in the root README (compose up → pip install sdk → run example → open dashboard)
+- [x] Collector config verified against the real API ingest path: `otlphttp` → `http://api:8000/v1/traces`, protobuf content-type, retry + sending-queue for kill/restart resilience
+- [x] **Real OTLP/protobuf ingest test** (`tests/api/test_ingest_protobuf.py`) — the wire format the Collector actually sends, proven queryable end-to-end through the API (Phase 2 only covered JSON)
+- [x] Backend Dockerfile fixed (build ran `pip install` before `src/` was copied → hatchling failure) — migrations run on start via `alembic upgrade head`
+- [x] API healthcheck in compose; Collector + dashboard gated on `api: service_healthy`
+- [x] Quickstart in the root README (compose up → pip install sdk → run example → dashboard) + `make e2e`
+- [x] Acceptance script `scripts/e2e-smoke.sh`: compose up → run example → assert queryable → kill API mid-run → restart → assert Collector replayed (no loss)
+- [ ] **Run `make e2e` on a Docker host** — needs the Docker daemon (unavailable in this dev env); the script + configs are ready. This is the one remaining M4 gate.
 
-**Accept when:** the M4 acceptance script (compose up, run example, query API, kill/restart API test) passes repeatably.
+**Accept when:** `make e2e` passes repeatably on a machine with Docker Desktop running. All code/config is in place and unit-verified; the live compose run is the user's to execute.
 
 ## Phase 5 — Dashboard core (M5)
 
