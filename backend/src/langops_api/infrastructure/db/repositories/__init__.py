@@ -276,6 +276,14 @@ class PostgresExecutionRepository:
         rows = await self._session.execute(query.group_by(ExecutionModel.status))
         return {status: int(count) for status, count in rows.all()}
 
+    async def delete_older_than(self, cutoff: datetime) -> int:
+        # Single delete; child rows cascade at the DB level (FK ondelete=CASCADE,
+        # with SQLite FK enforcement enabled in session.py for tests).
+        result = await self._session.execute(
+            sa.delete(ExecutionModel).where(ExecutionModel.started_at < cutoff)
+        )
+        return int(getattr(result, "rowcount", 0) or 0)
+
     async def get_by_trace_id(self, trace_id: str) -> Execution | None:
         row = await self._session.scalar(
             sa.select(ExecutionModel).where(ExecutionModel.trace_id == trace_id)

@@ -47,6 +47,9 @@ test-backend:
 migrate:       ## Apply database migrations against the running Postgres
 	cd backend && alembic upgrade head
 
+retention:     ## Delete executions older than N days (DAYS=30 by default)
+	cd backend && python -m langops_api.retention --days $(or $(DAYS),30)
+
 ## ── Dashboard ────────────────────────────────────────────────────────
 
 lint-dashboard:

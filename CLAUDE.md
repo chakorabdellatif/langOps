@@ -12,10 +12,18 @@ The MVP focuses on **observability, not orchestration**. Features like prompt ve
 
 ## Current Status
 
-The monorepo skeleton is scaffolded (packages, configs, CI, Docker/Compose, docs), but feature code is not yet implemented — most Python modules are docstring stubs. Two documents drive all work:
+Phases 1–7 are implemented and Phase 8 is largely done; the product works end-to-end. Local-dev only (no hosted CI). Two documents drive all work:
 
-- `docs/architecture.md` — the implementation blueprint (services, monorepo layout, backend layering, database schema, SDK instrumentation strategy, dashboard architecture, Docker topology, conventions). Consult it before implementing anything.
-- `tasks.md` — the phased build plan (Phase 1–8, mapped to the architecture milestones) with acceptance criteria. Work phases in order and keep checkbox statuses current.
+- `docs/architecture.md` — the implementation blueprint (services, layering, schema, SDK strategy, dashboard, Docker, conventions). Consult before implementing.
+- `tasks.md` — the phased build plan with acceptance criteria and current checkbox state. Keep it updated.
+
+What exists and is tested:
+- **backend/** — full FastAPI service: OTLP ingest (`POST /v1/traces`, protobuf + JSON, idempotent, out-of-order safe); query API (executions, nodes, graphs/topology, state evolution, costs, metrics, SSE `/events`); layered + import-linter enforced; Alembic schema; retention job (`python -m langops_api.retention --days N`). 19 tests.
+- **sdk/** — `langops.instrument(graph)` emits OTel spans (execution/node/LLM/tool) per `docs/semantic-conventions.md`; fault-isolated. 15 tests.
+- **dashboard/** — Next.js UI: overview, executions list/detail (React Flow graph, timeline, state diff + context-growth, LLM inspector, logs), costs (Recharts), metrics; SSE live updates. `next build` + `tsc` clean.
+- **Pricing** is a JSON catalog (`backend/.../infrastructure/pricing/`, ADR-0002), not a DB table; unknown models → `cost_status: "unknown"`, never $0.
+
+Verify with `make lint` / `make test` per package; `make e2e` runs the full Docker pipeline (needs a Docker daemon). Remaining: the multi-agent-rag example, live `make e2e` run, and the 0.1.0 PyPI release.
 
 `docs/semantic-conventions.md` is the SDK↔backend contract (the `langops.*` / `gen_ai.*` OTel attribute namespace); it is mirrored in `sdk/src/langops/semconv.py` and must never drift. Backend layering (`presentation → application → domain ← infrastructure`) is enforced by import-linter contracts in `backend/pyproject.toml`.
 
