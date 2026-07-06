@@ -1,0 +1,8 @@
+{
+  "provider": "groq",
+  "currency": "USD",
+  "models": [
+    { "name": "llama-3.3-70b-versatile", "input": 0.59, "output": 0.79, "effective_from": "2025-01-01" },
+    { "name": "llama-3.1-8b-instant", "input": 0.05, "output": 0.08, "effective_from": "2025-01-01" }
+  ]
+}

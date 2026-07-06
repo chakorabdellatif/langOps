@@ -1,11 +1,12 @@
 {
   "provider": "openai",
-  "models": {
-    "gpt-4o": { "input": 2.5, "output": 10.0 },
-    "gpt-4o-mini": { "input": 0.15, "output": 0.6 },
-    "gpt-4.1": { "input": 2.0, "output": 8.0 },
-    "gpt-4.1-mini": { "input": 0.4, "output": 1.6 },
-    "o3": { "input": 2.0, "output": 8.0 },
-    "o4-mini": { "input": 1.1, "output": 4.4 }
-  }
+  "currency": "USD",
+  "models": [
+    { "name": "gpt-4o", "input": 2.5, "output": 10.0, "effective_from": "2024-01-01" },
+    { "name": "gpt-4o-mini", "input": 0.15, "output": 0.6, "effective_from": "2024-01-01" },
+    { "name": "gpt-4.1", "input": 2.0, "output": 8.0, "effective_from": "2025-01-01" },
+    { "name": "gpt-4.1-mini", "input": 0.4, "output": 1.6, "effective_from": "2025-01-01" },
+    { "name": "o3", "input": 2.0, "output": 8.0, "effective_from": "2025-01-01" },
+    { "name": "o4-mini", "input": 1.1, "output": 4.4, "effective_from": "2025-01-01" }
+  ]
 }
