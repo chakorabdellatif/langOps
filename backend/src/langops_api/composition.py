@@ -28,7 +28,7 @@ from langops_api.application.services.reports import (
     GetStateEvolutionService,
     ListGraphsService,
 )
-from langops_api.domain.services import CostCalculator, StateDiffer
+from langops_api.domain.services import CostCalculator, ExecutionComparator, StateDiffer
 from langops_api.infrastructure.cache import (
     EVENTS_CHANNEL,
     NullEventPublisher,
@@ -59,6 +59,7 @@ class Container:
         self.session_factory = create_session_factory(self.engine)
         self.cost_calculator = CostCalculator()
         self.state_differ = StateDiffer()
+        self.execution_comparator = ExecutionComparator()
         # Pricing catalog is loaded once from JSON at startup (ADR-0002).
         self.pricing = PricingCatalog(settings.pricing_catalog_dir)
         self.publisher: EventPublisher
@@ -220,6 +221,8 @@ def get_compare_service(
     return CompareExecutionsService(
         detail=get_execution_detail_service(session),
         state_differ=container.state_differ,
+        comparator=container.execution_comparator,
+        snapshots=PostgresStateSnapshotRepository(session),
     )
 
 

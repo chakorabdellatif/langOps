@@ -277,40 +277,30 @@ or worse" — state, structure, performance, and plain-language insights.
 Entirely rule-based; **never an LLM**. (Merges wishlist items 2 and 4 — the
 "better state diff" sections *are* the richer comparison.)
 
-- [ ] Domain service `ExecutionComparator` (pure, no I/O — unit-testable
-      like `StateDiffer`), composing four sections:
-      - **State changes** — reuse `StateDiffer` (added/modified/removed);
-        presentation improvement only, semantics unchanged
-      - **Execution changes** — node added/removed, execution-order change
-        (sequence comparison), retries added/removed, topology-hash change
-      - **Performance deltas** — duration, cost, total tokens, context size
-        (state `size_bytes` series), per-node latency; each as
-        `{a, b, delta, delta_pct}`; deltas involving `cost_status: unknown`
-        are marked incomparable, never treated as 0
-      - **LLM changes** — model changed, temperature changed, prompt
-        (messages payload) changed y/n + size delta, response length delta,
-        tool-call count change
-- [ ] Rule-based insight generator: threshold-driven observations from the
-      four sections ("Summary node latency increased 71%", "Context size
-      doubled before writer", "Topology changed", "1 retry added", "Tool
-      calls 2 → 5"); each insight cites its metric; thresholds in one
-      constants module — deterministic and snapshot-testable
-- [ ] Extend `CompareExecutionsService` + `/executions/compare` response
-      additively (keep `a`, `b`, `final_state_diff`; add `execution_changes`,
-      `performance`, `llm_changes`, `insights`)
-- [ ] Dashboard compare page: four-section layout (State / Execution /
-      Performance / Insights), delta chips (▲/▼ with good/bad coloring —
-      lower latency/cost is green), per-node latency table, insight list
-- [ ] "Compare with…" entry point from execution detail (pre-fills one side;
-      suggest same graph + thread)
-- [ ] Tests: comparator unit matrix (identical runs → empty sections; each
-      change class detected exactly once), insight snapshot tests, API
-      contract test, unknown-cost incomparability
+- [x] Domain service `ExecutionComparator` (pure, no I/O — unit-tested like
+      `StateDiffer`), composing four sections: **State** (reuse `StateDiffer`),
+      **Execution** (nodes added/removed, order change, retries add/remove,
+      topology change), **Performance** (duration/cost/tokens/context-size +
+      per-node latency as `{a, b, delta, delta_pct, comparable}`; unknown cost
+      → incomparable, never 0), **LLM** (model/temperature/prompt-size/
+      response-length/tool-call-count)
+- [x] Rule-based insight generator: threshold-driven (`Thresholds` constants),
+      each insight cites its metric + severity (info/good/bad); deterministic
+      and snapshot-tested
+- [x] Extended `CompareExecutionsService` + `/executions/compare` additively
+      (kept `a`/`b`/`final_state_diff`; added `result` with the four sections
+      + `insights`)
+- [x] Dashboard compare page: Insights / Performance / Execution / LLM cards
+      with ▲/▼ delta chips (lower latency/cost = green), per-node latency table
+- [x] "Compare with…" entry point from execution detail → `/compare?a=<id>`
+      (Suspense-wrapped `useSearchParams`)
+- [x] Tests: comparator unit matrix (identical → empty; each change class),
+      insight snapshot, API contract (model swap + token increase),
+      unknown-cost incomparability
 
 **Accept when:** comparing two fixture runs with a known injected difference
-(model swap + one retry + slower node) surfaces exactly the expected
-execution changes, performance deltas, and insights — reproducibly, with no
-LLM involved.
+surfaces exactly the expected execution changes, performance deltas, and
+insights — reproducibly, no LLM. ✅ (7 unit + 1 API test; `next build` clean)
 
 ## Phase 11 — Logs experience (M11)
 

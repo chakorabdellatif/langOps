@@ -429,15 +429,91 @@ class MetricsOverviewResponse(BaseModel):
         return cls(**metrics.__dict__)
 
 
+class MetricDeltaResponse(BaseModel):
+    a: float | None
+    b: float | None
+    delta: float | None
+    delta_pct: float | None
+    comparable: bool
+
+
+class ExecutionChangesResponse(BaseModel):
+    nodes_added: list[str]
+    nodes_removed: list[str]
+    order_changed: bool
+    retries_added: list[str]
+    retries_removed: list[str]
+    topology_changed: bool
+
+
+class PerformanceChangesResponse(BaseModel):
+    duration: MetricDeltaResponse
+    cost: MetricDeltaResponse
+    total_tokens: MetricDeltaResponse
+    context_size: MetricDeltaResponse
+    node_latency: list[dict[str, Any]]
+
+
+class LlmChangesResponse(BaseModel):
+    model_changed: bool
+    models_a: list[str]
+    models_b: list[str]
+    temperature_changed: bool
+    prompt_changed: bool
+    prompt_chars: MetricDeltaResponse
+    response_chars: MetricDeltaResponse
+    tool_calls: MetricDeltaResponse
+
+
+class InsightResponse(BaseModel):
+    text: str
+    metric: str
+    severity: str
+
+
+class ComparisonResultResponse(BaseModel):
+    execution_changes: ExecutionChangesResponse
+    performance: PerformanceChangesResponse
+    llm_changes: LlmChangesResponse
+    insights: list[InsightResponse]
+
+
 class ExecutionComparisonResponse(BaseModel):
     a: ExecutionDetailResponse
     b: ExecutionDetailResponse
     final_state_diff: dict[str, Any] | None
+    result: ComparisonResultResponse | None
 
     @classmethod
     def from_dto(cls, comparison: ExecutionComparison) -> ExecutionComparisonResponse:
+        result = comparison.result
         return cls(
             a=ExecutionDetailResponse.from_dto(comparison.a),
             b=ExecutionDetailResponse.from_dto(comparison.b),
             final_state_diff=comparison.final_state_diff,
+            result=None
+            if result is None
+            else ComparisonResultResponse(
+                execution_changes=ExecutionChangesResponse(**result.execution_changes.__dict__),
+                performance=PerformanceChangesResponse(
+                    duration=MetricDeltaResponse(**result.performance.duration.__dict__),
+                    cost=MetricDeltaResponse(**result.performance.cost.__dict__),
+                    total_tokens=MetricDeltaResponse(**result.performance.total_tokens.__dict__),
+                    context_size=MetricDeltaResponse(**result.performance.context_size.__dict__),
+                    node_latency=result.performance.node_latency,
+                ),
+                llm_changes=LlmChangesResponse(
+                    model_changed=result.llm_changes.model_changed,
+                    models_a=result.llm_changes.models_a,
+                    models_b=result.llm_changes.models_b,
+                    temperature_changed=result.llm_changes.temperature_changed,
+                    prompt_changed=result.llm_changes.prompt_changed,
+                    prompt_chars=MetricDeltaResponse(**result.llm_changes.prompt_chars.__dict__),
+                    response_chars=MetricDeltaResponse(
+                        **result.llm_changes.response_chars.__dict__
+                    ),
+                    tool_calls=MetricDeltaResponse(**result.llm_changes.tool_calls.__dict__),
+                ),
+                insights=[InsightResponse(**i.__dict__) for i in result.insights],
+            ),
         )
