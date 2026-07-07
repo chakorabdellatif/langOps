@@ -220,8 +220,58 @@ export interface MetricsOverview {
   latency_p99_ms: number | null;
 }
 
+export interface MetricDelta {
+  a: number | null;
+  b: number | null;
+  delta: number | null;
+  delta_pct: number | null;
+  comparable: boolean;
+}
+
+export interface ExecutionChanges {
+  nodes_added: string[];
+  nodes_removed: string[];
+  order_changed: boolean;
+  retries_added: string[];
+  retries_removed: string[];
+  topology_changed: boolean;
+}
+
+export interface PerformanceChanges {
+  duration: MetricDelta;
+  cost: MetricDelta;
+  total_tokens: MetricDelta;
+  context_size: MetricDelta;
+  node_latency: { node: string; a: number | null; b: number | null; delta_pct: number | null }[];
+}
+
+export interface LlmChanges {
+  model_changed: boolean;
+  models_a: string[];
+  models_b: string[];
+  temperature_changed: boolean;
+  prompt_changed: boolean;
+  prompt_chars: MetricDelta;
+  response_chars: MetricDelta;
+  tool_calls: MetricDelta;
+}
+
+export interface ComparisonInsight {
+  text: string;
+  metric: string;
+  severity: "info" | "good" | "bad";
+}
+
+export interface ComparisonResult {
+  execution_changes: ExecutionChanges;
+  performance: PerformanceChanges;
+  llm_changes: LlmChanges;
+  insights: ComparisonInsight[];
+}
+
 export interface ExecutionComparison {
   a: ExecutionDetail;
   b: ExecutionDetail;
   final_state_diff: StateDiff | null;
+  result: ComparisonResult | null;
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useParams } from "next/navigation";
 
 import { Card, Cost, Duration, EmptyState, JsonViewer, StatusBadge, Tokens } from "@/components/data";
@@ -40,6 +41,12 @@ export default function ExecutionDetailPage() {
           <StatusBadge status={ex.status} />
           <h1 className="font-mono text-lg">{ex.id.slice(0, 12)}</h1>
           {ex.resumed && <span className="text-xs text-amber-400">resumed from checkpoint</span>}
+          <Link
+            href={`/compare?a=${ex.id}`}
+            className="ml-auto rounded border border-neutral-700 px-2.5 py-1 text-xs text-neutral-300 hover:bg-neutral-800"
+          >
+            Compare with…
+          </Link>
         </div>
         <div className="mt-3 grid grid-cols-2 gap-4 text-sm md:grid-cols-5">
           <Meta label="Graph">{data.graph_name ?? "—"}</Meta>

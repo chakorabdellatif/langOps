@@ -13,6 +13,7 @@ from langops_api.domain.entities import (
     StateSnapshot,
     ToolCall,
 )
+from langops_api.domain.services.execution_comparator import ComparisonResult
 
 
 @dataclass
@@ -100,3 +101,6 @@ class ExecutionComparison:
     b: ExecutionDetail
     # StateDiff of the two final outputs (added/modified/removed), or None.
     final_state_diff: dict[str, object] | None
+    # Deterministic execution/performance/LLM diff + insights (v0.2). Optional
+    # so callers that only want the state diff need not build it.
+    result: ComparisonResult | None = None
