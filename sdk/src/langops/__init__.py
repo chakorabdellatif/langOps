@@ -18,7 +18,7 @@ from langops.config import LangOpsConfig
 if TYPE_CHECKING:
     from opentelemetry.sdk.trace import TracerProvider
 
-__version__ = "0.1.0.dev0"
+__version__ = "0.1.0"
 
 __all__ = ["LangOpsConfig", "instrument", "__version__"]
 

@@ -2,6 +2,8 @@
 
 > **A lightweight observability and evaluation platform for LangGraph applications.**
 
+![status: v0.1.0](https://img.shields.io/badge/status-v0.1.0-0ea5e9) ![license: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue) ![stack: FastAPI · Next.js · OTel](https://img.shields.io/badge/stack-FastAPI%20·%20Next.js%20·%20OpenTelemetry-111)
+
 LangOps is an open-source developer platform that provides deep observability, debugging, and evaluation capabilities for **LangGraph-based AI applications**.
 
 Instead of replacing LangGraph, LangOps integrates seamlessly into existing projects to help developers understand what happens inside their agent workflows. It automatically captures graph executions, node transitions, LLM calls, state changes, token usage, costs, latency, tool invocations, and execution logs, all accessible through a modern web dashboard.
@@ -121,9 +123,19 @@ View:
 
 ---
 
+## Execution Comparison
+
+Diff two runs side by side — the fast way to see what a prompt or code change did:
+
+- Graph path and per-node status
+- State evolution and **final-state diff** (added / modified / removed)
+- Token usage, cost, latency, and retry deltas
+- LLM responses and tool outputs
+
 ## REST API
 
 Expose execution data through a FastAPI backend for integration with external tools.
+Interactive OpenAPI docs are served at `http://localhost:8000/docs`.
 
 ---
 
@@ -360,3 +372,26 @@ LangOps follows four core principles:
 # Vision
 
 LangOps aims to become the observability layer for LangGraph applications by providing developers with the tools needed to inspect, monitor, debug, and optimize AI agent workflows from local development to production.
+
+---
+
+# Contributing
+
+Contributions are welcome. Start with the [Architecture Design Document](docs/architecture.md)
+(the implementation blueprint) and [`docs/contributing.md`](docs/contributing.md).
+
+```bash
+cp .env.example .env
+make lint      # ruff + mypy + import-linter (backend) + eslint/tsc (dashboard)
+make test      # unit + API tests for sdk, backend, dashboard
+make e2e       # full Docker pipeline smoke test (needs Docker running)
+```
+
+Ground rules: keep the backend layering (`presentation → application → domain ← infrastructure`,
+enforced by import-linter); never invent an OTel attribute without adding it to
+[`docs/semantic-conventions.md`](docs/semantic-conventions.md) first; significant
+decisions get an ADR in [`docs/adr/`](docs/adr/); Conventional Commits.
+
+# License
+
+[Apache-2.0](LICENSE).

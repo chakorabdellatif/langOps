@@ -178,9 +178,21 @@ is tagged.
 - [ ] `make e2e` on a Docker host (the M4 gate) — script ready, needs a daemon
 - [ ] Load sanity: 100 concurrent executions ingested without loss; document limits
 - [ ] Coverage gate ≥ 90% on backend domain + application layers
-- [ ] Version and publish `langops` 0.1.0 to PyPI; tag the repo; changelog
+- [x] Version bump to 0.1.0 (sdk + backend) and `CHANGELOG.md`
+- [ ] Publish `langops` 0.1.0 to PyPI + tag the repo (release step for the user)
 
-**Accept when:** clean-machine quickstart < 10 minutes; `make e2e` passes locally; all §9 conventions are enforced by tooling. (Core hardening done; live E2E, load test, and release remain — infra/release steps for the user.)
+**Accept when:** clean-machine quickstart < 10 minutes; `make e2e` passes locally; all §9 conventions are enforced by tooling. (Core hardening done; live E2E, load test, and PyPI/tag remain — infra/release steps for the user.)
+
+---
+
+## Pre-0.1.0 roadmap follow-ups (post-milestone polish)
+
+- [x] **M1** JSON pricing catalog: currency + effective_from arrays, groq/mistral/custom, prefix matching, `reload()`; unknown → `cost_status`, never $0
+- [x] **M2** Dashboard polish: richer Overview (tokens/cost/avg latency/success rate), Execution Explorer tabs (Overview/Graph/Timeline/State/LLM Calls/Tool Calls/Logs), graph node badges, JSON viewer copy+collapse, colorized diffs
+- [x] **M3** Hardening: structlog JSON logging with correlation IDs, payload size limit (413), no stack-trace leakage, graceful SDK degradation
+- [x] **Execution Comparison** (differentiator): `/executions/compare` + dashboard side-by-side (metric deltas, graph paths, final-state diff)
+- [x] **M5** README (features, comparison, contributing, license, badges) + `CHANGELOG.md` + version 0.1.0
+- [ ] **M4** Live `docker compose up` E2E + 100-execution load test with documented latency/throughput — needs a Docker daemon (`make e2e` ready)
 
 ---
 
