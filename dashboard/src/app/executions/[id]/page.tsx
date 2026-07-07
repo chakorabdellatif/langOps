@@ -90,7 +90,7 @@ export default function ExecutionDetailPage() {
       {tab === "Graph" && <GraphView graphId={ex.graph_id} nodeStatus={nodeStatus} />}
       {tab === "Timeline" && (
         <Card>
-          <TimelineView executionId={id} />
+          <TimelineView executionId={id} nodes={data.nodes} />
         </Card>
       )}
       {tab === "State" && <StateView executionId={id} />}
