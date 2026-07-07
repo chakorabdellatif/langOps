@@ -5,7 +5,7 @@ coexists with any OpenTelemetry instrumentation the user already runs. Resource
 attributes identify the service, SDK version, and project.
 """
 
-from __future__ import annotations
+import atexit
 
 from opentelemetry.sdk.resources import SERVICE_NAME, Resource
 from opentelemetry.sdk.trace import TracerProvider
@@ -31,4 +31,7 @@ def build_tracer_provider(config: LangOpsConfig) -> TracerProvider:
     )
     provider = TracerProvider(resource=resource, sampler=sampler)
     provider.add_span_processor(build_processor(config))
+    # Flush the batch on process exit so short-lived scripts don't lose spans.
+    # (We never set the global provider, so OTel's own atexit isn't registered.)
+    atexit.register(provider.shutdown)
     return provider
