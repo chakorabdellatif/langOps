@@ -1,24 +1,35 @@
 "use client";
 
-import { Card, Cost, Duration, EmptyState, ExecutionLink, StatusBadge, Stat } from "@/components/data";
-import { useExecutions, useMetrics } from "@/lib/api/hooks";
+import { Card, Cost, Duration, EmptyState, ExecutionLink, StatusBadge, Stat, Tokens } from "@/components/data";
+import { useCostSummary, useExecutions, useMetrics } from "@/lib/api/hooks";
 
 export default function OverviewPage() {
   const metrics = useMetrics();
+  const costs = useCostSummary();
   const executions = useExecutions({ page_size: 8 });
+  const m = metrics.data;
+  const successRate = m && m.total_executions ? (m.succeeded / m.total_executions) * 100 : null;
 
   return (
     <div className="space-y-6">
       <h1 className="text-2xl font-semibold">Overview</h1>
 
       <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-        <Stat label="Executions">{metrics.data?.total_executions ?? "—"}</Stat>
-        <Stat label="Failure rate">
-          {metrics.data ? `${(metrics.data.failure_rate * 100).toFixed(0)}%` : "—"}
+        <Stat label="Executions">{m?.total_executions ?? "—"}</Stat>
+        <Stat label="Running">{m?.running ?? "—"}</Stat>
+        <Stat label="Failed">{m?.failed ?? "—"}</Stat>
+        <Stat label="Success rate">{successRate == null ? "—" : `${successRate.toFixed(0)}%`}</Stat>
+        <Stat label="Total tokens">
+          {costs.data ? <Tokens n={costs.data.total_tokens} /> : "—"}
         </Stat>
-        <Stat label="Running">{metrics.data?.running ?? "—"}</Stat>
+        <Stat label="Total cost">
+          {costs.data ? <Cost usd={costs.data.total_cost} /> : "—"}
+        </Stat>
+        <Stat label="Avg latency">
+          <Duration ms={m?.avg_latency_ms ?? null} />
+        </Stat>
         <Stat label="p95 latency">
-          <Duration ms={metrics.data?.latency_p95_ms ?? null} />
+          <Duration ms={m?.latency_p95_ms ?? null} />
         </Stat>
       </div>
 

@@ -6,7 +6,13 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from langops_api.application.dto import MetricsOverview, StateEvolution, StateStep
+from langops_api.application.dto import (
+    ExecutionComparison,
+    MetricsOverview,
+    StateEvolution,
+    StateStep,
+)
+from langops_api.application.services.queries import GetExecutionDetailService
 from langops_api.domain.entities import Graph
 from langops_api.domain.errors import ExecutionNotFound
 from langops_api.domain.repositories import (
@@ -17,6 +23,7 @@ from langops_api.domain.repositories import (
     ProjectRepository,
     StateSnapshotRepository,
 )
+from langops_api.domain.services import StateDiffer
 from langops_api.domain.value_objects import ExecutionStatus
 
 
@@ -103,10 +110,27 @@ class GetMetricsService:
             failed=failed,
             running=running,
             failure_rate=(failed / finished) if finished else 0.0,
+            avg_latency_ms=round(sum(durations) / len(durations)) if durations else None,
             latency_p50_ms=_percentile(durations, 0.50),
             latency_p95_ms=_percentile(durations, 0.95),
             latency_p99_ms=_percentile(durations, 0.99),
         )
+
+
+class CompareExecutionsService:
+    """Fetch two executions and diff their final states (reuses StateDiffer)."""
+
+    def __init__(self, detail: GetExecutionDetailService, state_differ: StateDiffer) -> None:
+        self._detail = detail
+        self._state_differ = state_differ
+
+    async def compare(self, a_id: UUID, b_id: UUID) -> ExecutionComparison:
+        a = await self._detail.get(a_id)
+        b = await self._detail.get(b_id)
+        diff = None
+        if isinstance(a.execution.output, dict) and isinstance(b.execution.output, dict):
+            diff = self._state_differ.diff(a.execution.output, b.execution.output).to_dict()
+        return ExecutionComparison(a=a, b=b, final_state_diff=diff)
 
 
 def _percentile(sorted_values: list[int], q: float) -> int | None:

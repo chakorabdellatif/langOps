@@ -177,7 +177,14 @@ export interface MetricsOverview {
   failed: number;
   running: number;
   failure_rate: number;
+  avg_latency_ms: number | null;
   latency_p50_ms: number | null;
   latency_p95_ms: number | null;
   latency_p99_ms: number | null;
+}
+
+export interface ExecutionComparison {
+  a: ExecutionDetail;
+  b: ExecutionDetail;
+  final_state_diff: StateDiff | null;
 }

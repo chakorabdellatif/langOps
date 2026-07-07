@@ -22,6 +22,7 @@ from langops_api.application.services.queries import (
     ListExecutionsService,
 )
 from langops_api.application.services.reports import (
+    CompareExecutionsService,
     GetCostReportService,
     GetMetricsService,
     GetStateEvolutionService,
@@ -200,6 +201,16 @@ def get_metrics_service(
     return GetMetricsService(
         projects=PostgresProjectRepository(session),
         executions=PostgresExecutionRepository(session),
+    )
+
+
+def get_compare_service(
+    session: AsyncSession = Depends(get_session),
+    container: Container = Depends(get_container),
+) -> CompareExecutionsService:
+    return CompareExecutionsService(
+        detail=get_execution_detail_service(session),
+        state_differ=container.state_differ,
     )
 
 

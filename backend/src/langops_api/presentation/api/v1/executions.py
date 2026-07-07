@@ -11,18 +11,25 @@ from langops_api.application.services.queries import (
     GetExecutionDetailService,
     ListExecutionsService,
 )
-from langops_api.application.services.reports import GetStateEvolutionService
+from langops_api.application.services.reports import (
+    CompareExecutionsService,
+    GetStateEvolutionService,
+)
 from langops_api.composition import (
+    get_compare_service,
     get_execution_detail_service,
     get_list_executions_service,
     get_state_evolution_service,
 )
 from langops_api.presentation.schemas import (
+    ExecutionComparisonResponse,
     ExecutionDetailResponse,
     ExecutionListResponse,
+    LlmCallResponse,
     LogResponse,
     StateEvolutionResponse,
     TimelineEntryResponse,
+    ToolCallResponse,
 )
 
 router = APIRouter(prefix="/executions", tags=["executions"])
@@ -49,6 +56,16 @@ async def list_executions(
         page_size=page_size,
     )
     return ExecutionListResponse.from_dto(result)
+
+
+# Declared before /{execution_id} so "compare" is not parsed as a UUID.
+@router.get("/compare", response_model=ExecutionComparisonResponse)
+async def compare_executions(
+    a: UUID = Query(...),
+    b: UUID = Query(...),
+    service: CompareExecutionsService = Depends(get_compare_service),
+) -> ExecutionComparisonResponse:
+    return ExecutionComparisonResponse.from_dto(await service.compare(a, b))
 
 
 @router.get("/{execution_id}", response_model=ExecutionDetailResponse)
@@ -81,3 +98,19 @@ async def get_execution_state(
     service: GetStateEvolutionService = Depends(get_state_evolution_service),
 ) -> StateEvolutionResponse:
     return StateEvolutionResponse.from_dto(await service.get(execution_id))
+
+
+@router.get("/{execution_id}/llm-calls", response_model=list[LlmCallResponse])
+async def get_execution_llm_calls(
+    execution_id: UUID,
+    service: GetExecutionDetailService = Depends(get_execution_detail_service),
+) -> list[LlmCallResponse]:
+    return [LlmCallResponse.from_entity(c) for c in await service.llm_calls(execution_id)]
+
+
+@router.get("/{execution_id}/tool-calls", response_model=list[ToolCallResponse])
+async def get_execution_tool_calls(
+    execution_id: UUID,
+    service: GetExecutionDetailService = Depends(get_execution_detail_service),
+) -> list[ToolCallResponse]:
+    return [ToolCallResponse.from_entity(c) for c in await service.tool_calls(execution_id)]
