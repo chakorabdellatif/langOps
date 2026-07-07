@@ -7,12 +7,13 @@ idempotent under OTLP at-least-once redelivery.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
 import sqlalchemy as sa
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from uuid6 import uuid7
 
@@ -164,18 +165,36 @@ class PostgresProjectRepository:
         self._session = session
 
     async def get_or_create_default(self) -> Project:
+        existing = await self._select_default()
+        if existing is not None:
+            return existing
+
+        # Concurrent ingests can each miss the SELECT and both INSERT, violating
+        # the unique slug. Insert inside a savepoint; on conflict, roll back just
+        # the savepoint and re-read the row the other transaction committed.
+        row = ProjectModel(
+            id=uuid7(),
+            name="default",
+            slug="default",
+            created_at=datetime.now(tz=UTC),
+        )
+        try:
+            async with self._session.begin_nested():
+                self._session.add(row)
+                await self._session.flush()
+        except IntegrityError:
+            existing = await self._select_default()
+            if existing is None:
+                raise
+            return existing
+        return Project(id=row.id, name=row.name, slug=row.slug, created_at=row.created_at)
+
+    async def _select_default(self) -> Project | None:
         row = await self._session.scalar(
             sa.select(ProjectModel).where(ProjectModel.slug == "default")
         )
         if row is None:
-            row = ProjectModel(
-                id=uuid7(),
-                name="default",
-                slug="default",
-                created_at=datetime.now(tz=None).astimezone(),
-            )
-            self._session.add(row)
-            await self._session.flush()
+            return None
         return Project(id=row.id, name=row.name, slug=row.slug, created_at=row.created_at)
 
 

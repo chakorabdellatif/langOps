@@ -69,6 +69,14 @@ class Container:
             self.redis = None
             self.publisher = NullEventPublisher()
 
+    async def ensure_default_project(self) -> None:
+        """Create the default project once at startup, before serving requests.
+
+        Removes the first-request creation race under concurrent ingestion.
+        """
+        async with self.session_factory() as session, session.begin():
+            await PostgresProjectRepository(session).get_or_create_default()
+
     async def dispose(self) -> None:
         await self.engine.dispose()
         if self.redis is not None:
