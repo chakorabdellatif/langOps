@@ -80,6 +80,37 @@ def test_execution_and_node_spans() -> None:
     payload = _event(nodes[0], semconv.EVENT_STATE_INPUT).attributes[semconv.PAYLOAD]
     assert json.loads(payload) == {"x": 1}
 
+    # Topology payload is v2: node objects {id, ...} and edge objects.
+    topo = json.loads(_event(execution, semconv.EVENT_GRAPH_TOPOLOGY).attributes[semconv.PAYLOAD])
+    assert {n["id"] for n in topo["nodes"]} >= {"plan", "act"}
+    assert all("source" in e and "target" in e and "conditional" in e for e in topo["edges"])
+
+
+def test_conditional_node_gets_category() -> None:
+    provider, exporter = _provider()
+
+    def route(state: State) -> str:
+        return "act" if state["x"] > 0 else END
+
+    graph = StateGraph(State)
+    graph.add_node("plan", lambda s: {"x": s["x"] + 1})
+    graph.add_node("act", lambda s: {"x": s["x"] * 2})
+    graph.add_edge(START, "plan")
+    graph.add_conditional_edges("plan", route, {"act": "act", END: END})
+    graph.add_edge("act", END)
+    instrumented = langops.instrument(graph.compile(), tracer_provider=provider)
+
+    instrumented.invoke({"x": 1})
+
+    spans = exporter.get_finished_spans()
+    plan = next(
+        s
+        for s in spans
+        if s.attributes.get(semconv.KIND) == "node" and s.attributes[semconv.NODE_NAME] == "plan"
+    )
+    # "plan" is the source of a conditional edge → categorised as conditional.
+    assert plan.attributes[semconv.NODE_CATEGORY] == semconv.NodeCategory.CONDITIONAL
+
 
 def test_llm_and_tool_spans_via_handler() -> None:
     provider, exporter = _provider()

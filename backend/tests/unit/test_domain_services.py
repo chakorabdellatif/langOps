@@ -3,7 +3,7 @@
 from decimal import Decimal
 
 from langops_api.domain.entities import ModelPricing
-from langops_api.domain.services import CostCalculator, StateDiffer
+from langops_api.domain.services import CostCalculator, StateDiffer, infer_category
 from langops_api.domain.value_objects import CostStatus, TokenUsage
 
 
@@ -48,3 +48,23 @@ def test_state_differ_detects_added_modified_removed() -> None:
 def test_state_differ_empty_when_unchanged() -> None:
     diff = StateDiffer().diff({"a": 1}, {"a": 1})
     assert diff.is_empty
+
+
+def test_infer_category_from_children() -> None:
+    assert infer_category(None, has_llm=True, has_tool=False) == "llm"
+    assert infer_category(None, has_llm=True, has_tool=True) == "llm"  # llm wins
+    assert infer_category(None, has_llm=False, has_tool=True) == "tool"
+    assert infer_category(None, has_llm=False, has_tool=False) == "utility"
+
+
+def test_infer_category_structural_sdk_hint_wins() -> None:
+    # Structural categories are authoritative even over runtime children.
+    assert infer_category("router", has_llm=True, has_tool=False) == "router"
+    assert infer_category("conditional", has_llm=False, has_tool=False) == "conditional"
+    assert infer_category("subgraph", has_llm=True, has_tool=True) == "subgraph"
+
+
+def test_infer_category_non_structural_hint_is_fallback_only() -> None:
+    # A non-structural SDK hint is used only when there are no children.
+    assert infer_category("utility", has_llm=True, has_tool=False) == "llm"
+    assert infer_category("something", has_llm=False, has_tool=False) == "something"

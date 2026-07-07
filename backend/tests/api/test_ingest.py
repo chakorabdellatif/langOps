@@ -120,6 +120,14 @@ async def test_ingest_then_query(client: httpx.AsyncClient) -> None:
     assert detail["graph_name"] == "demo"
     assert len(detail["nodes"]) == 1
     node = detail["nodes"][0]
+    # v0.2 per-node rollups: the node has an LLM child, so it is an llm agent
+    # with its child's tokens/cost rolled up and the model surfaced.
+    assert node["category"] == "llm"
+    assert node["input_tokens"] == 1_000_000
+    assert node["output_tokens"] == 500_000
+    assert node["cost_status"] == "priced"
+    assert node["total_cost"] == pytest.approx(17.5)
+    assert node["models"] == ["claude-opus-4-8"]
 
     node_detail = (await client.get(f"/api/v1/nodes/{node['id']}")).json()
     assert len(node_detail["llm_calls"]) == 1

@@ -25,7 +25,8 @@ from langops_api.domain.repositories import (
     StateSnapshotRepository,
     ToolCallRepository,
 )
-from langops_api.domain.services import CostCalculator, StateDiffer
+from langops_api.domain.services import CostCalculator, StateDiffer, infer_category
+from langops_api.domain.value_objects import TokenUsage
 from langops_api.infrastructure.otlp import ParsedSpan
 
 logger = structlog.get_logger("langops_api.ingest")
@@ -149,7 +150,12 @@ class IngestTelemetryService:
             record.node_execution_id = await resolve_node(node_span_id)
             await self._logs.upsert(record)
 
-        # Rollups are recomputed from child rows, never incremented —
+        # Per-node rollups + category, recomputed from child rows across the
+        # whole execution (not just this batch) so late/out-of-order LLM and
+        # tool spans still land on their node — idempotent by construction.
+        await self._recompute_node_rollups(execution_id)
+
+        # Execution rollups are recomputed from child rows, never incremented —
         # idempotent by construction (architecture §3.6).
         tokens, total_cost = await self._llm_calls.sum_usage(execution_id)
         await self._executions.update_rollups(execution_id, tokens, total_cost)
@@ -163,3 +169,26 @@ class IngestTelemetryService:
             llm_calls=len(trace.llm_calls),
             tool_calls=len(trace.tool_calls),
         )
+
+    async def _recompute_node_rollups(self, execution_id: UUID) -> None:
+        nodes = await self._nodes.list_by_execution(execution_id)
+        if not nodes:
+            return
+        llm_by_node = await self._llm_calls.aggregate_by_node(execution_id)
+        tool_node_ids = await self._tool_calls.node_ids_with_calls(execution_id)
+        for node in nodes:
+            tokens, total_cost, cost_status = llm_by_node.get(
+                node.id, (TokenUsage(), None, "unknown")
+            )
+            category = infer_category(
+                node.category,
+                has_llm=node.id in llm_by_node,
+                has_tool=node.id in tool_node_ids,
+            )
+            await self._nodes.update_rollups(
+                node.id,
+                category=category,
+                tokens=tokens,
+                total_cost=total_cost,
+                cost_status=cost_status,
+            )

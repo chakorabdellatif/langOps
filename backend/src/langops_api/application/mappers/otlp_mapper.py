@@ -165,6 +165,7 @@ def _map_execution(trace: MappedTrace, span: ParsedSpan) -> None:
 
 
 def _map_node(trace: MappedTrace, span: ParsedSpan) -> None:
+    category = span.attributes.get(semconv.NODE_CATEGORY)
     node = NodeExecution(
         id=_stable_id("node", span.span_id),
         execution_id=PENDING_EXECUTION_ID,
@@ -178,6 +179,7 @@ def _map_node(trace: MappedTrace, span: ParsedSpan) -> None:
         started_at=_ts(span.start_ns),
         ended_at=_ts(span.end_ns),
         duration_ms=_duration_ms(span),
+        category=str(category) if category else None,
     )
     trace.nodes.append(node)
 

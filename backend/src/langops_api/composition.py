@@ -159,6 +159,7 @@ def get_execution_detail_service(
         graphs=PostgresGraphRepository(session),
         llm_calls=PostgresLlmCallRepository(session),
         tool_calls=PostgresToolCallRepository(session),
+        snapshots=PostgresStateSnapshotRepository(session),
         logs=PostgresLogRepository(session),
     )
 

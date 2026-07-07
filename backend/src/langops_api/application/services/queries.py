@@ -9,9 +9,10 @@ from langops_api.application.dto import (
     ExecutionDetail,
     ExecutionPage,
     NodeDetail,
+    NodeView,
     TimelineEntry,
 )
-from langops_api.domain.entities import LlmCall, LogRecord, ToolCall
+from langops_api.domain.entities import LlmCall, LogRecord, NodeExecution, ToolCall
 from langops_api.domain.errors import ExecutionNotFound, NodeExecutionNotFound
 from langops_api.domain.repositories import (
     ExecutionRepository,
@@ -67,6 +68,7 @@ class GetExecutionDetailService:
         graphs: GraphRepository,
         llm_calls: LlmCallRepository,
         tool_calls: ToolCallRepository,
+        snapshots: StateSnapshotRepository,
         logs: LogRepository,
     ) -> None:
         self._executions = executions
@@ -74,6 +76,7 @@ class GetExecutionDetailService:
         self._graphs = graphs
         self._llm_calls = llm_calls
         self._tool_calls = tool_calls
+        self._snapshots = snapshots
         self._logs = logs
 
     async def get(self, execution_id: UUID) -> ExecutionDetail:
@@ -82,11 +85,59 @@ class GetExecutionDetailService:
             raise ExecutionNotFound(f"Execution {execution_id} not found")
         graph = await self._graphs.get(execution.graph_id) if execution.graph_id else None
         nodes = await self._nodes.list_by_execution(execution_id)
+        views = await self._build_node_views(execution_id, nodes)
         return ExecutionDetail(
             execution=execution,
             graph_name=graph.name if graph else None,
-            nodes=nodes,
+            nodes=views,
         )
+
+    async def _build_node_views(
+        self, execution_id: UUID, nodes: list[NodeExecution]
+    ) -> list[NodeView]:
+        """Enrich nodes with models/tools/state-changes via three batch queries
+        (one per child kind for the whole execution) — never one fetch per node.
+        """
+        models: dict[UUID, list[str]] = {}
+        for call in await self._llm_calls.list_by_execution(execution_id):
+            if call.node_execution_id and call.model:
+                bucket = models.setdefault(call.node_execution_id, [])
+                if call.model not in bucket:
+                    bucket.append(call.model)
+
+        tools: dict[UUID, list[str]] = {}
+        for tool_call in await self._tool_calls.list_by_execution(execution_id):
+            if tool_call.node_execution_id:
+                bucket = tools.setdefault(tool_call.node_execution_id, [])
+                if tool_call.tool_name not in bucket:
+                    bucket.append(tool_call.tool_name)
+
+        # State change keys come from each node's "output" snapshot diff.
+        changes: dict[UUID, dict[str, list[str]]] = {}
+        for snap in await self._snapshots.list_by_execution(execution_id):
+            if snap.node_execution_id is None or snap.kind != "output" or not snap.diff:
+                continue
+            diff = snap.diff
+            changes[snap.node_execution_id] = {
+                "added": sorted((diff.get("added") or {}).keys()),
+                "modified": sorted((diff.get("modified") or {}).keys()),
+                "removed": list(diff.get("removed") or []),
+            }
+
+        views = []
+        for node in nodes:
+            change = changes.get(node.id, {})
+            views.append(
+                NodeView(
+                    node=node,
+                    models=models.get(node.id, []),
+                    tool_names=tools.get(node.id, []),
+                    state_added=change.get("added", []),
+                    state_modified=change.get("modified", []),
+                    state_removed=change.get("removed", []),
+                )
+            )
+        return views
 
     async def timeline(self, execution_id: UUID) -> list[TimelineEntry]:
         if await self._executions.get(execution_id) is None:

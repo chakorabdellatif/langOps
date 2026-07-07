@@ -18,6 +18,7 @@ from langops_api.application.dto import (
     ExecutionPage,
     MetricsOverview,
     NodeDetail,
+    NodeView,
     StateEvolution,
     TimelineEntry,
 )
@@ -90,6 +91,12 @@ class ExecutionListResponse(BaseModel):
         )
 
 
+class NodeStateChanges(BaseModel):
+    added: list[str] = []
+    modified: list[str] = []
+    removed: list[str] = []
+
+
 class NodeSummaryResponse(BaseModel):
     id: UUID
     node_name: str
@@ -100,9 +107,45 @@ class NodeSummaryResponse(BaseModel):
     ended_at: datetime | None
     duration_ms: int | None
     error: dict[str, Any] | None
+    # v0.2 graph-inspection fields (fall back for pre-0.2 rows).
+    category: str
+    input_tokens: int
+    output_tokens: int
+    total_tokens: int
+    total_cost: float | None
+    cost_status: str
+    models: list[str]
+    tool_names: list[str]
+    state_changes: NodeStateChanges
 
     @classmethod
     def from_entity(cls, node: NodeExecution) -> NodeSummaryResponse:
+        """Build from a node alone (node inspector) — no per-execution derivations."""
+        return cls._build(node)
+
+    @classmethod
+    def from_view(cls, view: NodeView) -> NodeSummaryResponse:
+        return cls._build(
+            view.node,
+            models=view.models,
+            tool_names=view.tool_names,
+            state_changes=NodeStateChanges(
+                added=view.state_added,
+                modified=view.state_modified,
+                removed=view.state_removed,
+            ),
+        )
+
+    @classmethod
+    def _build(
+        cls,
+        node: NodeExecution,
+        *,
+        models: list[str] | None = None,
+        tool_names: list[str] | None = None,
+        state_changes: NodeStateChanges | None = None,
+    ) -> NodeSummaryResponse:
+        cost = node.cost
         return cls(
             id=node.id,
             node_name=node.node_name,
@@ -113,6 +156,15 @@ class NodeSummaryResponse(BaseModel):
             ended_at=node.ended_at,
             duration_ms=node.duration_ms,
             error=node.error,
+            category=node.category or "utility",
+            input_tokens=node.tokens.input_tokens,
+            output_tokens=node.tokens.output_tokens,
+            total_tokens=node.tokens.total_tokens,
+            total_cost=float(cost.total_cost) if cost.total_cost is not None else None,
+            cost_status=cost.status.value,
+            models=models or [],
+            tool_names=tool_names or [],
+            state_changes=state_changes or NodeStateChanges(),
         )
 
 
@@ -135,7 +187,7 @@ class ExecutionDetailResponse(BaseModel):
             error=execution.error,
             input=execution.input,
             output=execution.output,
-            nodes=[NodeSummaryResponse.from_entity(n) for n in detail.nodes],
+            nodes=[NodeSummaryResponse.from_view(n) for n in detail.nodes],
         )
 
 

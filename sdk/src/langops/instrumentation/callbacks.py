@@ -48,11 +48,14 @@ class LangOpsCallbackHandler(BaseCallbackHandler):
         execution_id: str,
         root_span: Span,
         config: LangOpsConfig,
+        node_categories: dict[str, str] | None = None,
     ) -> None:
         self._tracer = tracer
         self._execution_id = execution_id
         self._root_span = root_span
         self._config = config
+        # Structural node categories derived from the graph topology (v0.2).
+        self._node_categories = node_categories or {}
         self._spans: dict[UUID, Span] = {}
         self._retries: dict[tuple[str, int], int] = {}
         self._warned: set[str] = set()
@@ -105,18 +108,17 @@ class LangOpsCallbackHandler(BaseCallbackHandler):
             retry_key = (node_name, sequence)
             retry_count = self._retries.get(retry_key, 0)
             self._retries[retry_key] = retry_count + 1
-            span = self._start_span(
-                node_name,
-                run_id,
-                parent_run_id,
-                {
-                    semconv.KIND: semconv.Kind.NODE,
-                    semconv.EXECUTION_ID: self._execution_id,
-                    semconv.NODE_NAME: node_name,
-                    semconv.NODE_SEQUENCE: sequence,
-                    semconv.NODE_RETRY_COUNT: retry_count,
-                },
-            )
+            attributes: dict[str, Any] = {
+                semconv.KIND: semconv.Kind.NODE,
+                semconv.EXECUTION_ID: self._execution_id,
+                semconv.NODE_NAME: node_name,
+                semconv.NODE_SEQUENCE: sequence,
+                semconv.NODE_RETRY_COUNT: retry_count,
+            }
+            category = self._node_categories.get(node_name)
+            if category:
+                attributes[semconv.NODE_CATEGORY] = category
+            span = self._start_span(node_name, run_id, parent_run_id, attributes)
             add_payload_event(
                 span, semconv.EVENT_STATE_INPUT, inputs, self._config, with_message_count=True
             )

@@ -87,6 +87,12 @@ def _node_to_entity(row: NodeExecutionModel) -> NodeExecution:
         started_at=row.started_at,
         ended_at=row.ended_at,
         duration_ms=row.duration_ms,
+        category=row.category,
+        tokens=TokenUsage(row.input_tokens, row.output_tokens),
+        cost=Cost(
+            total_cost=Decimal(row.total_cost) if row.total_cost is not None else None,
+            status=CostStatus(row.cost_status),
+        ),
     )
 
 
@@ -412,8 +418,34 @@ class PostgresNodeExecutionRepository:
         row.started_at = node.started_at or row.started_at
         row.ended_at = node.ended_at or row.ended_at
         row.duration_ms = node.duration_ms if node.duration_ms is not None else row.duration_ms
+        # Category from the SDK; never blanked by redelivery. Token/cost rollups
+        # are owned by update_rollups (recomputed from child rows), not here.
+        row.category = node.category or row.category
         await self._session.flush()
         return _node_to_entity(row)
+
+    async def update_rollups(
+        self,
+        node_execution_id: UUID,
+        *,
+        category: str | None,
+        tokens: TokenUsage,
+        total_cost: Decimal | None,
+        cost_status: str,
+    ) -> None:
+        values: dict[str, Any] = {
+            "input_tokens": tokens.input_tokens,
+            "output_tokens": tokens.output_tokens,
+            "total_cost": total_cost,
+            "cost_status": cost_status,
+        }
+        if category is not None:
+            values["category"] = category
+        await self._session.execute(
+            sa.update(NodeExecutionModel)
+            .where(NodeExecutionModel.id == node_execution_id)
+            .values(**values)
+        )
 
     async def get(self, node_execution_id: UUID) -> NodeExecution | None:
         row = await self._session.get(NodeExecutionModel, node_execution_id)
@@ -479,6 +511,38 @@ class PostgresLlmCallRepository:
             .order_by(LlmCallModel.started_at)
         )
         return [_llm_to_entity(r) for r in rows]
+
+    async def aggregate_by_node(
+        self, execution_id: UUID
+    ) -> dict[UUID, tuple[TokenUsage, Decimal | None, str]]:
+        """Per-node token/cost rollup from child LLM calls.
+
+        Cost is ``None`` with status ``unknown`` when any child call is unpriced
+        (ADR-0002 — a node's cost is only trustworthy if every call is priced).
+        """
+        unknown = sa.case((LlmCallModel.cost_status == "unknown", 1), else_=0)
+        rows = await self._session.execute(
+            sa.select(
+                LlmCallModel.node_execution_id,
+                sa.func.coalesce(sa.func.sum(LlmCallModel.input_tokens), 0),
+                sa.func.coalesce(sa.func.sum(LlmCallModel.output_tokens), 0),
+                sa.func.coalesce(sa.func.sum(LlmCallModel.cost), 0),
+                sa.func.coalesce(sa.func.sum(unknown), 0),
+            )
+            .where(
+                LlmCallModel.execution_id == execution_id,
+                LlmCallModel.node_execution_id.is_not(None),
+            )
+            .group_by(LlmCallModel.node_execution_id)
+        )
+        result: dict[UUID, tuple[TokenUsage, Decimal | None, str]] = {}
+        for node_id, inp, out, cost, unknown_calls in rows.all():
+            tokens = TokenUsage(int(inp), int(out))
+            if int(unknown_calls) > 0:
+                result[node_id] = (tokens, None, "unknown")
+            else:
+                result[node_id] = (tokens, Decimal(str(cost)), "priced")
+        return result
 
     async def sum_usage(self, execution_id: UUID) -> tuple[TokenUsage, Decimal]:
         result = (
@@ -576,6 +640,18 @@ class PostgresToolCallRepository:
             .order_by(ToolCallModel.started_at)
         )
         return [_tool_to_entity(r) for r in rows]
+
+    async def node_ids_with_calls(self, execution_id: UUID) -> set[UUID]:
+        """Node ids that have at least one tool call — for category inference."""
+        rows = await self._session.scalars(
+            sa.select(ToolCallModel.node_execution_id)
+            .where(
+                ToolCallModel.execution_id == execution_id,
+                ToolCallModel.node_execution_id.is_not(None),
+            )
+            .distinct()
+        )
+        return {r for r in rows if r is not None}
 
 
 class PostgresStateSnapshotRepository:

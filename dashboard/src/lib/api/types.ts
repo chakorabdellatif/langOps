@@ -27,6 +27,21 @@ export interface ExecutionList {
   page_size: number;
 }
 
+export type NodeCategory =
+  | "llm"
+  | "tool"
+  | "utility"
+  | "router"
+  | "conditional"
+  | "checkpoint"
+  | "subgraph";
+
+export interface NodeStateChanges {
+  added: string[];
+  modified: string[];
+  removed: string[];
+}
+
 export interface NodeSummary {
   id: string;
   node_name: string;
@@ -37,6 +52,16 @@ export interface NodeSummary {
   ended_at: string | null;
   duration_ms: number | null;
   error: Record<string, unknown> | null;
+  // v0.2 graph-inspection fields.
+  category: NodeCategory | string;
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+  total_cost: number | null;
+  cost_status: "priced" | "unknown";
+  models: string[];
+  tool_names: string[];
+  state_changes: NodeStateChanges;
 }
 
 export interface ExecutionDetail {
@@ -149,9 +174,21 @@ export interface GraphSummary {
   created_at: string;
 }
 
+export interface TopologyNode {
+  id: string;
+  category?: NodeCategory | string;
+}
+
+export interface TopologyEdge {
+  source: string;
+  target: string;
+  conditional?: boolean;
+}
+
+// Topology payload accepts both v1 (bare strings / 2-tuples) and v2 (objects).
 export interface GraphTopology {
-  nodes: string[];
-  edges: [string, string][];
+  nodes: (string | TopologyNode)[];
+  edges: ([string, string] | TopologyEdge)[];
 }
 
 export interface CostByModel {
