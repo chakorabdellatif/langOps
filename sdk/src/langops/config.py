@@ -28,6 +28,9 @@ class LangOpsConfig:
     capture_state: bool = True
     capture_llm_payloads: bool = True
     capture_tool_payloads: bool = True
+    # Opt-in: bridge stdlib `logging` records into the trace as langops.log
+    # events on the active node/execution span (off by default — zero cost).
+    capture_logs: bool = False
 
     # Limits & privacy
     max_payload_bytes: int = 65_536

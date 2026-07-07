@@ -48,6 +48,14 @@ class ExecutionDetail:
 
 
 @dataclass
+class LogPage:
+    items: list[LogRecord]
+    total: int
+    limit: int
+    offset: int
+
+
+@dataclass
 class TimelineEntry:
     kind: str  # node | llm | tool
     id: str

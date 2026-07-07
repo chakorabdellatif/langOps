@@ -55,6 +55,11 @@ def instrument(
             tracer_provider = build_tracer_provider(config)
 
         instrument_graph(graph, config, tracer_provider)
+        if config.capture_logs:
+            with contextlib.suppress(Exception):  # log bridge is best-effort
+                from langops.instrumentation.logging_handler import install_log_capture
+
+                install_log_capture(config)
         with contextlib.suppress(Exception):  # guard flag is best-effort
             setattr(graph, _INSTRUMENTED, True)
     except Exception:  # noqa: BLE001 — instrumentation must never break adoption

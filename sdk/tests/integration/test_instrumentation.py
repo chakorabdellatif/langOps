@@ -86,6 +86,37 @@ def test_execution_and_node_spans() -> None:
     assert all("source" in e and "target" in e and "conditional" in e for e in topo["edges"])
 
 
+def test_log_capture_attaches_to_node_span() -> None:
+    import logging
+
+    provider, exporter = _provider()
+
+    def logging_node(state: State) -> dict:
+        logging.getLogger("myapp").warning("hello from node")
+        return {"x": state["x"] + 1}
+
+    graph = StateGraph(State)
+    graph.add_node("work", logging_node)
+    graph.add_edge(START, "work")
+    graph.add_edge("work", END)
+    instrumented = langops.instrument(
+        graph.compile(), LangOpsConfig(capture_logs=True), tracer_provider=provider
+    )
+
+    instrumented.invoke({"x": 1})
+
+    spans = exporter.get_finished_spans()
+    node = next(
+        s
+        for s in spans
+        if s.attributes.get(semconv.KIND) == "node" and s.attributes[semconv.NODE_NAME] == "work"
+    )
+    log_event = _event(node, semconv.EVENT_LOG)
+    assert log_event.attributes[semconv.LOG_LEVEL] == "warning"
+    assert log_event.attributes[semconv.LOG_SOURCE] == semconv.LogSource.APP
+    assert "hello from node" in log_event.attributes[semconv.PAYLOAD]
+
+
 def test_conditional_node_gets_category() -> None:
     provider, exporter = _provider()
 

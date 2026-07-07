@@ -135,12 +135,32 @@ export interface StateDiff {
 
 export interface LogEntry {
   id: string;
+  execution_id: string;
   node_execution_id: string | null;
   level: string;
+  source: string;
+  logger: string | null;
   message: string;
   stack_trace: string | null;
   attributes: Record<string, unknown> | null;
   timestamp: string | null;
+}
+
+export interface LogPage {
+  items: LogEntry[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface LogFilters {
+  execution_id?: string;
+  node_execution_id?: string;
+  level?: string;
+  source?: string;
+  q?: string;
+  limit?: number;
+  offset?: number;
 }
 
 export interface NodeDetail {

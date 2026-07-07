@@ -20,6 +20,7 @@ from langops_api.application.services.queries import (
     GetExecutionDetailService,
     GetNodeDetailService,
     ListExecutionsService,
+    SearchLogsService,
 )
 from langops_api.application.services.reports import (
     CompareExecutionsService,
@@ -175,6 +176,12 @@ def get_node_detail_service(
         snapshots=PostgresStateSnapshotRepository(session),
         logs=PostgresLogRepository(session),
     )
+
+
+def get_search_logs_service(
+    session: AsyncSession = Depends(get_session),
+) -> SearchLogsService:
+    return SearchLogsService(logs=PostgresLogRepository(session))
 
 
 def get_list_graphs_service(

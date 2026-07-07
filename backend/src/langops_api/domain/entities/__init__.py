@@ -133,6 +133,9 @@ class LogRecord:
     level: str
     message: str
     node_execution_id: UUID | None = None
+    # v0.2: origin channel — app | sdk | llm | tool | exception.
+    source: str = "app"
+    logger: str | None = None
     stack_trace: str | None = None
     attributes: dict[str, Any] | None = None
     timestamp: datetime | None = None

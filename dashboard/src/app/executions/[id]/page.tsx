@@ -12,8 +12,8 @@ import { TimelineView } from "@/features/timeline/timeline-view";
 import {
   useExecution,
   useExecutionLlmCalls,
-  useExecutionLogs,
   useExecutionToolCalls,
+  useLogs,
 } from "@/lib/api/hooks";
 import type { NodeSummary } from "@/lib/api/types";
 
@@ -41,6 +41,7 @@ export default function ExecutionDetailPage() {
           <StatusBadge status={ex.status} />
           <h1 className="font-mono text-lg">{ex.id.slice(0, 12)}</h1>
           {ex.resumed && <span className="text-xs text-amber-400">resumed from checkpoint</span>}
+          <LogCountBadges executionId={id} />
           <Link
             href={`/compare?a=${ex.id}`}
             className="ml-auto rounded border border-neutral-700 px-2.5 py-1 text-xs text-neutral-300 hover:bg-neutral-800"
@@ -120,6 +121,24 @@ export default function ExecutionDetailPage() {
   );
 }
 
+function LogCountBadges({ executionId }: { executionId: string }) {
+  const errors = useLogs({ execution_id: executionId, level: "error", limit: 1 });
+  const warnings = useLogs({ execution_id: executionId, level: "warning", limit: 1 });
+  const errCount = errors.data?.total ?? 0;
+  const warnCount = warnings.data?.total ?? 0;
+  if (errCount === 0 && warnCount === 0) return null;
+  return (
+    <span className="flex items-center gap-1.5 text-xs">
+      {errCount > 0 && (
+        <span className="rounded bg-rose-500/15 px-2 py-0.5 text-rose-300">{errCount} err</span>
+      )}
+      {warnCount > 0 && (
+        <span className="rounded bg-amber-500/15 px-2 py-0.5 text-amber-300">{warnCount} warn</span>
+      )}
+    </span>
+  );
+}
+
 function Meta({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
@@ -129,21 +148,102 @@ function Meta({ label, children }: { label: string; children: React.ReactNode })
   );
 }
 
+const LEVEL_COLORS: Record<string, string> = {
+  error: "text-rose-400",
+  critical: "text-rose-400",
+  warning: "text-amber-400",
+  info: "text-sky-400",
+  debug: "text-neutral-500",
+};
+const SOURCE_FILTERS = ["app", "sdk", "llm", "tool", "exception"] as const;
+
 function LogsTab({ executionId }: { executionId: string }) {
-  const { data, isLoading } = useExecutionLogs(executionId);
-  if (isLoading) return <p className="text-sm text-neutral-500">Loading…</p>;
-  if (!data || data.length === 0) return <EmptyState>No logs.</EmptyState>;
+  const [level, setLevel] = useState<string>("");
+  const [source, setSource] = useState<string>("");
+  const [q, setQ] = useState<string>("");
+  const { data, isLoading } = useLogs({
+    execution_id: executionId,
+    level: level || undefined,
+    source: source || undefined,
+    q: q || undefined,
+    limit: 500,
+  });
+
   return (
-    <Card>
-      <div className="space-y-1 font-mono text-xs">
-        {data.map((log) => (
-          <div key={log.id} className="flex gap-3">
-            <span className="uppercase text-neutral-500">{log.level}</span>
-            <span className="text-neutral-300">{log.message}</span>
-          </div>
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <input
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="Search messages…"
+          className="w-56 rounded border border-neutral-800 bg-neutral-900 px-3 py-1.5 text-sm"
+        />
+        <Chip active={level === ""} onClick={() => setLevel("")}>All levels</Chip>
+        <Chip active={level === "error"} onClick={() => setLevel("error")}>Errors</Chip>
+        <Chip active={level === "warning"} onClick={() => setLevel("warning")}>Warnings</Chip>
+        <span className="mx-1 text-neutral-700">|</span>
+        <Chip active={source === ""} onClick={() => setSource("")}>All sources</Chip>
+        {SOURCE_FILTERS.map((s) => (
+          <Chip key={s} active={source === s} onClick={() => setSource(s)}>
+            {s.toUpperCase()}
+          </Chip>
         ))}
       </div>
-    </Card>
+
+      {isLoading ? (
+        <p className="text-sm text-neutral-500">Loading…</p>
+      ) : !data || data.items.length === 0 ? (
+        <EmptyState>No logs match these filters.</EmptyState>
+      ) : (
+        <Card>
+          <div className="space-y-1.5 font-mono text-xs">
+            {data.items.map((log) => (
+              <div key={log.id} className="flex items-start gap-3">
+                <span className="w-36 shrink-0 text-neutral-600">
+                  {log.timestamp?.slice(11, 23) ?? "—"}
+                </span>
+                <span className={`w-16 shrink-0 uppercase ${LEVEL_COLORS[log.level] ?? "text-neutral-400"}`}>
+                  {log.level}
+                </span>
+                <span className="w-14 shrink-0 text-neutral-600">{log.source}</span>
+                <span className="flex-1 text-neutral-300">
+                  {log.message}
+                  {log.stack_trace && (
+                    <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap rounded bg-neutral-900/70 p-2 text-[11px] text-rose-300">
+                      {log.stack_trace}
+                    </pre>
+                  )}
+                </span>
+              </div>
+            ))}
+          </div>
+          <div className="mt-2 text-xs text-neutral-600">{data.total} log line(s)</div>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+function Chip({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`rounded px-2.5 py-1 text-xs ring-1 ${
+        active
+          ? "bg-sky-500/15 text-sky-300 ring-sky-500/30"
+          : "text-neutral-400 ring-neutral-700 hover:text-neutral-200"
+      }`}
+    >
+      {children}
+    </button>
   );
 }
 

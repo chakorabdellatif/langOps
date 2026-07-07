@@ -156,6 +156,8 @@ def _log_to_entity(row: LogModel) -> LogRecord:
         execution_id=row.execution_id,
         node_execution_id=row.node_execution_id,
         level=row.level,
+        source=row.source,
+        logger=row.logger,
         message=row.message,
         stack_trace=row.stack_trace,
         attributes=row.attributes,
@@ -710,6 +712,8 @@ class PostgresLogRepository:
             self._session.add(row)
         row.node_execution_id = record.node_execution_id or row.node_execution_id
         row.level = record.level
+        row.source = record.source
+        row.logger = record.logger or row.logger
         row.message = record.message
         row.stack_trace = record.stack_trace or row.stack_trace
         row.attributes = record.attributes if record.attributes is not None else row.attributes
@@ -732,6 +736,40 @@ class PostgresLogRepository:
             .order_by(LogModel.timestamp)
         )
         return [_log_to_entity(r) for r in rows]
+
+    async def search(
+        self,
+        *,
+        execution_id: UUID | None = None,
+        node_execution_id: UUID | None = None,
+        level: str | None = None,
+        source: str | None = None,
+        q: str | None = None,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> tuple[list[LogRecord], int]:
+        query = sa.select(LogModel)
+        if execution_id is not None:
+            query = query.where(LogModel.execution_id == execution_id)
+        if node_execution_id is not None:
+            query = query.where(LogModel.node_execution_id == node_execution_id)
+        if level:
+            query = query.where(LogModel.level == level)
+        if source:
+            query = query.where(LogModel.source == source)
+        if q:
+            query = query.where(LogModel.message.ilike(f"%{q}%"))
+        if since is not None:
+            query = query.where(LogModel.timestamp >= since)
+        if until is not None:
+            query = query.where(LogModel.timestamp <= until)
+        total = await self._session.scalar(sa.select(sa.func.count()).select_from(query.subquery()))
+        rows = await self._session.scalars(
+            query.order_by(LogModel.timestamp.desc().nulls_last()).offset(offset).limit(limit)
+        )
+        return [_log_to_entity(r) for r in rows], int(total or 0)
 
 
 # Pricing is served from the JSON catalog (infrastructure/pricing/), not the DB
