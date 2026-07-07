@@ -134,6 +134,7 @@ def _map_span(trace: MappedTrace, span: ParsedSpan) -> None:
     # Spans without a langops.kind (foreign instrumentation) are ignored.
 
     _map_exception_logs(trace, span)
+    _map_structured_logs(trace, span)
 
 
 def _map_execution(trace: MappedTrace, span: ParsedSpan) -> None:
@@ -257,9 +258,34 @@ def _map_exception_logs(trace: MappedTrace, span: ParsedSpan) -> None:
             id=_stable_id("log", span.span_id, str(index)),
             execution_id=PENDING_EXECUTION_ID,
             level="error",
+            source=semconv.LOG_SOURCE_EXCEPTION,
             message=str(event.attributes.get(semconv.EXCEPTION_MESSAGE, "error")),
             stack_trace=event.attributes.get(semconv.EXCEPTION_STACKTRACE),
             attributes={"exception.type": event.attributes.get(semconv.EXCEPTION_TYPE)},
             timestamp=_ts(event.timestamp_ns) or _ts(span.end_ns),
+        )
+        trace.logs.append((record, span.span_id if is_node else None))
+
+
+def _map_structured_logs(trace: MappedTrace, span: ParsedSpan) -> None:
+    """Map langops.log events (v0.2) → LogRecord, linked to the node span."""
+    is_node = span.attributes.get(semconv.KIND) == semconv.KIND_NODE
+    for index, event in enumerate(span.events):
+        if event.name != semconv.EVENT_LOG:
+            continue
+        payload = _payload(event)
+        message = ""
+        if isinstance(payload, dict):
+            message = str(payload.get("message", ""))
+        elif payload is not None:
+            message = str(payload)
+        record = LogRecord(
+            id=_stable_id("applog", span.span_id, str(index)),
+            execution_id=PENDING_EXECUTION_ID,
+            level=str(event.attributes.get(semconv.LOG_LEVEL, "info")),
+            source=str(event.attributes.get(semconv.LOG_SOURCE, semconv.LOG_SOURCE_APP)),
+            logger=event.attributes.get(semconv.LOG_LOGGER),
+            message=message,
+            timestamp=_ts(event.timestamp_ns) or _ts(span.start_ns),
         )
         trace.logs.append((record, span.span_id if is_node else None))

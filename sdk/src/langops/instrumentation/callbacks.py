@@ -19,7 +19,7 @@ from opentelemetry.trace import Span, Status, StatusCode
 
 from langops import semconv
 from langops.config import LangOpsConfig
-from langops.instrumentation.runtime import add_payload_event
+from langops.instrumentation.runtime import add_payload_event, current_run
 
 logger = logging.getLogger("langops")
 
@@ -119,6 +119,10 @@ class LangOpsCallbackHandler(BaseCallbackHandler):
             if category:
                 attributes[semconv.NODE_CATEGORY] = category
             span = self._start_span(node_name, run_id, parent_run_id, attributes)
+            # Track the active node span so log records attach to it (v0.2).
+            run = current_run.get()
+            if run is not None:
+                run.node_spans.append(span)
             add_payload_event(
                 span, semconv.EVENT_STATE_INPUT, inputs, self._config, with_message_count=True
             )
@@ -130,6 +134,7 @@ class LangOpsCallbackHandler(BaseCallbackHandler):
             span = self._finish(run_id)
             if span is None:
                 return
+            self._pop_node_span(span)
             add_payload_event(
                 span, semconv.EVENT_STATE_OUTPUT, outputs, self._config, with_message_count=True
             )
@@ -141,9 +146,16 @@ class LangOpsCallbackHandler(BaseCallbackHandler):
         try:
             span = self._finish(run_id, error)
             if span is not None:
+                self._pop_node_span(span)
                 span.end()
         except Exception as inner:  # noqa: BLE001
             self._warn_once("on_chain_error", inner)
+
+    @staticmethod
+    def _pop_node_span(span: Span) -> None:
+        run = current_run.get()
+        if run is not None and span in run.node_spans:
+            run.node_spans.remove(span)
 
     # ── LLM spans ──────────────────────────────────────────────────────
 

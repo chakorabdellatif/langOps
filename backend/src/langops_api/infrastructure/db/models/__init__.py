@@ -188,6 +188,7 @@ class LogModel(Base):
     __table_args__ = (
         sa.Index("ix_logs_execution_timestamp", "execution_id", "timestamp"),
         sa.Index("ix_logs_level_timestamp", "level", "timestamp"),
+        sa.Index("ix_logs_source", "source"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True)
@@ -198,6 +199,9 @@ class LogModel(Base):
         sa.ForeignKey("node_executions.id", ondelete="CASCADE"), nullable=True
     )
     level: Mapped[str] = mapped_column(sa.Text, default="info")
+    # v0.2: origin channel (app | sdk | llm | tool | exception).
+    source: Mapped[str] = mapped_column(sa.Text, default="app")
+    logger: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
     message: Mapped[str] = mapped_column(sa.Text)
     stack_trace: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
     attributes: Mapped[Any | None] = mapped_column(JSONType, nullable=True)

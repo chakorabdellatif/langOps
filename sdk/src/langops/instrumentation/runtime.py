@@ -7,7 +7,7 @@ current execution's root span without threading it through LangGraph.
 from __future__ import annotations
 
 from contextvars import ContextVar
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from opentelemetry.trace import Span
@@ -24,6 +24,14 @@ class RunContext:
     # Authoritative checkpoint lineage, filled in by the checkpointer wrapper.
     checkpoint_id: str | None = None
     parent_checkpoint_id: str | None = None
+    # Stack of currently-executing node spans (for attributing log records to
+    # the node that emitted them); empty → logs attach to the execution root.
+    node_spans: list[Span] = field(default_factory=list)
+
+    @property
+    def target_span(self) -> Span:
+        """The innermost active node span, or the execution root."""
+        return self.node_spans[-1] if self.node_spans else self.root_span
 
 
 current_run: ContextVar[RunContext | None] = ContextVar("langops_current_run", default=None)
@@ -36,11 +44,13 @@ def add_payload_event(
     config: LangOpsConfig,
     *,
     with_message_count: bool = False,
+    extra_attributes: dict[str, Any] | None = None,
 ) -> None:
     """Attach a JSON payload to ``span`` as a span event (redacted + size-capped).
 
     Large payloads ride as events, not attributes, per the semantic
-    conventions. Never raises — capture failures must not break the run.
+    conventions. ``extra_attributes`` are merged onto the event (e.g. log
+    level/source). Never raises — capture failures must not break the run.
     """
     try:
         redacted = redaction.apply(value, config.redaction_hook)
@@ -53,6 +63,8 @@ def add_payload_event(
             count = state.count_messages(jsonable)
             if count is not None:
                 attributes[semconv.STATE_MESSAGE_COUNT] = count
+        if extra_attributes:
+            attributes.update(extra_attributes)
         span.add_event(event_name, attributes=attributes)
     except Exception:  # noqa: BLE001 — telemetry must never break the host graph
         return

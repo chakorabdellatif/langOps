@@ -165,6 +165,22 @@ class LogRepository(Protocol):
 
     async def list_by_node(self, node_execution_id: UUID) -> list[LogRecord]: ...
 
+    async def search(
+        self,
+        *,
+        execution_id: UUID | None = None,
+        node_execution_id: UUID | None = None,
+        level: str | None = None,
+        source: str | None = None,
+        q: str | None = None,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> tuple[list[LogRecord], int]:
+        """Filtered log search (newest first) + total count."""
+        ...
+
 
 class PricingRepository(Protocol):
     async def get_price(

@@ -16,6 +16,7 @@ from langops_api.application.dto import (
     ExecutionComparison,
     ExecutionDetail,
     ExecutionPage,
+    LogPage,
     MetricsOverview,
     NodeDetail,
     NodeView,
@@ -308,8 +309,11 @@ class StateSnapshotResponse(BaseModel):
 
 class LogResponse(BaseModel):
     id: UUID
+    execution_id: UUID
     node_execution_id: UUID | None
     level: str
+    source: str
+    logger: str | None
     message: str
     stack_trace: str | None
     attributes: dict[str, Any] | None
@@ -319,12 +323,31 @@ class LogResponse(BaseModel):
     def from_entity(cls, record: LogRecord) -> LogResponse:
         return cls(
             id=record.id,
+            execution_id=record.execution_id,
             node_execution_id=record.node_execution_id,
             level=record.level,
+            source=record.source,
+            logger=record.logger,
             message=record.message,
             stack_trace=record.stack_trace,
             attributes=record.attributes,
             timestamp=record.timestamp,
+        )
+
+
+class LogPageResponse(BaseModel):
+    items: list[LogResponse]
+    total: int
+    limit: int
+    offset: int
+
+    @classmethod
+    def from_dto(cls, page: LogPage) -> LogPageResponse:
+        return cls(
+            items=[LogResponse.from_entity(r) for r in page.items],
+            total=page.total,
+            limit=page.limit,
+            offset=page.offset,
         )
 
 

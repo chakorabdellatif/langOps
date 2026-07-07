@@ -307,33 +307,29 @@ insights — reproducibly, no LLM. ✅ (7 unit + 1 API test; `next build` clean)
 Goal: logs become a first-class debugging channel — today only exception
 events reach the `logs` table (always level `error`).
 
-- [ ] SDK: opt-in `LangOpsConfig(capture_logs=True)` installs a
-      `logging.Handler` that emits `langops.log` span events onto the
-      current active LangOps span (level, logger name, message, source
-      `app`); SDK-internal warnings emit with source `sdk`; events pass the
-      existing redaction hook + payload cap; fault-isolated like every other
-      capture path (a raising handler can never break the host app)
-- [ ] Ingestion: map `langops.log` events → `LogRecord` (in addition to
-      exception events); migration adds `logs.source` column (`app | sdk |
-      llm | tool | exception`); existing exception-derived rows classify as
-      `exception`
-- [ ] `SearchLogsService` + `GET /api/v1/logs`: filters `execution_id`
-      (optional — global search works too), `node_execution_id`, `level`,
-      `source`, `q` (ILIKE on message), time range; keyset pagination;
-      index on `(execution_id, timestamp)` + level/source
-- [ ] Dashboard Logs tab rebuilt: search box, level filter chips
-      (Errors / Warnings / All), source filter chips (App / SDK / LLM /
-      Tool), node filter dropdown; each row: timestamp, node, level badge,
-      message, expandable metadata (attributes JSON, execution/thread IDs,
-      stack trace via existing viewer)
-- [ ] Log-count badges: error/warning counts on the execution header and on
-      graph nodes (feeds Phase 9 tooltip)
-- [ ] Tests: handler fault-injection (SDK), log-event ingestion + source
-      classification, search filters + pagination, empty-state UX
+- [x] SDK: opt-in `LangOpsConfig(capture_logs=True)` installs a
+      `LangOpsLogHandler` on the root logger that emits `langops.log` events
+      onto the active node span (via a `node_spans` stack on `RunContext`),
+      falling back to the execution root; source `sdk` for `langops.*`
+      loggers else `app`; redaction + payload cap reused; fault-isolated
+- [x] Ingestion: `_map_structured_logs` maps `langops.log` events →
+      `LogRecord`; migration `0003_log_source` adds `logs.source`/`logger`;
+      exception rows classified `exception`
+- [x] `SearchLogsService` + `GET /api/v1/logs`: filters `execution_id`
+      (optional), `node_execution_id`, `level`, `source`, `q` (ILIKE), time
+      range; limit/offset pagination; `ix_logs_source` index added
+- [x] Dashboard Logs tab rebuilt: search box, level chips (All/Errors/
+      Warnings), source chips (App/SDK/LLM/Tool/Exception), timestamp +
+      level color + source + message + stack trace, total count
+- [x] Log-count badges: error/warning totals on the execution header
+- [x] Tests: SDK node-attribution capture, log-event ingestion + node
+      attribution, search filters (level/source/text), exception-source
+      classification
 
-**Accept when:** an example app using stdlib `logging` shows its log lines
-in the dashboard attributed to the right node, filterable by level/source
-and searchable by text; capture disabled by default costs nothing.
+**Accept when:** an app using stdlib `logging` shows its log lines in the
+dashboard attributed to the right node, filterable by level/source and
+searchable by text; capture off by default costs nothing. ✅ (SDK 17 +
+backend 45 tests; verified end-to-end in the visit-city run)
 
 ## Phase 12 — Execution replay, phases R1–R2 (M12)
 

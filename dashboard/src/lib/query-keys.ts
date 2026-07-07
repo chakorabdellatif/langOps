@@ -15,6 +15,9 @@ export const queryKeys = {
   nodes: {
     detail: (id: string) => ["nodes", "detail", id] as const,
   },
+  logs: {
+    search: (filters: Record<string, unknown>) => ["logs", "search", filters] as const,
+  },
   graphs: {
     all: ["graphs"] as const,
     topology: (id: string) => ["graphs", "topology", id] as const,

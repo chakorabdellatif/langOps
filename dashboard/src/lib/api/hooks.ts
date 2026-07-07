@@ -13,6 +13,8 @@ import type {
   GraphTopology,
   LlmCall,
   LogEntry,
+  LogFilters,
+  LogPage,
   MetricsOverview,
   NodeDetail,
   StateEvolution,
@@ -27,10 +29,10 @@ export interface ExecutionFilters {
   page_size?: number;
 }
 
-function query(filters: ExecutionFilters): string {
+function query(filters: object): string {
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(filters)) {
-    if (value !== undefined && value !== "") params.set(key, String(value));
+    if (value !== undefined && value !== "" && value !== null) params.set(key, String(value));
   }
   const s = params.toString();
   return s ? `?${s}` : "";
@@ -69,6 +71,13 @@ export function useExecutionLogs(id: string) {
   return useQuery({
     queryKey: queryKeys.executions.logs(id),
     queryFn: () => apiFetch<LogEntry[]>(`/api/v1/executions/${id}/logs`),
+  });
+}
+
+export function useLogs(filters: LogFilters = {}) {
+  return useQuery({
+    queryKey: queryKeys.logs.search(filters as Record<string, unknown>),
+    queryFn: () => apiFetch<LogPage>(`/api/v1/logs${query(filters)}`),
   });
 }
 

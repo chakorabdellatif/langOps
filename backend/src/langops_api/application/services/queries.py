@@ -8,6 +8,7 @@ from uuid import UUID
 from langops_api.application.dto import (
     ExecutionDetail,
     ExecutionPage,
+    LogPage,
     NodeDetail,
     NodeView,
     TimelineEntry,
@@ -224,3 +225,41 @@ class GetNodeDetailService:
             state_snapshots=await self._snapshots.list_by_node(node_execution_id),
             logs=await self._logs.list_by_node(node_execution_id),
         )
+
+
+MAX_LOG_LIMIT = 500
+
+
+class SearchLogsService:
+    """Filtered, paginated log search across the project (or one execution)."""
+
+    def __init__(self, logs: LogRepository) -> None:
+        self._logs = logs
+
+    async def search(
+        self,
+        *,
+        execution_id: UUID | None = None,
+        node_execution_id: UUID | None = None,
+        level: str | None = None,
+        source: str | None = None,
+        q: str | None = None,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> LogPage:
+        limit = min(max(1, limit), MAX_LOG_LIMIT)
+        offset = max(0, offset)
+        items, total = await self._logs.search(
+            execution_id=execution_id,
+            node_execution_id=node_execution_id,
+            level=level,
+            source=source,
+            q=q,
+            since=since,
+            until=until,
+            limit=limit,
+            offset=offset,
+        )
+        return LogPage(items=items, total=total, limit=limit, offset=offset)
