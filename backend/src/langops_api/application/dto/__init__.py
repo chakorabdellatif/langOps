@@ -24,10 +24,26 @@ class ExecutionPage:
 
 
 @dataclass
+class NodeView:
+    """A node plus display derivations for the graph tooltip/inspector.
+
+    ``node`` carries the persisted rollup (category, tokens, cost); the rest are
+    derived once per execution from child rows (no per-node fetch on hover).
+    """
+
+    node: NodeExecution
+    models: list[str]  # distinct models across this node's LLM calls
+    tool_names: list[str]  # distinct tools this node invoked
+    state_added: list[str]
+    state_modified: list[str]
+    state_removed: list[str]
+
+
+@dataclass
 class ExecutionDetail:
     execution: Execution
     graph_name: str | None
-    nodes: list[NodeExecution]
+    nodes: list[NodeView]
 
 
 @dataclass

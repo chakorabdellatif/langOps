@@ -99,6 +99,13 @@ class NodeExecutionModel(Base):
     started_at: Mapped[datetime | None] = mapped_column(sa.TIMESTAMP(timezone=True), nullable=True)
     ended_at: Mapped[datetime | None] = mapped_column(sa.TIMESTAMP(timezone=True), nullable=True)
     duration_ms: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
+    # v0.2: category + per-node rollups (recomputed from child llm_calls).
+    category: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    input_tokens: Mapped[int] = mapped_column(sa.Integer, default=0)
+    output_tokens: Mapped[int] = mapped_column(sa.Integer, default=0)
+    # NULL when any child LLM call is unpriced (ADR-0002 — never $0).
+    total_cost: Mapped[Decimal | None] = mapped_column(sa.Numeric(12, 6), nullable=True)
+    cost_status: Mapped[str] = mapped_column(sa.Text, default="unknown")
 
 
 class LlmCallModel(Base):

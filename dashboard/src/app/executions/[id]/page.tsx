@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 
 import { Card, Cost, Duration, EmptyState, JsonViewer, StatusBadge, Tokens } from "@/components/data";
 import { GraphView } from "@/features/graph/graph-view";
+import { NodeInspector } from "@/features/graph/node-inspector";
 import { StateView } from "@/features/state/state-view";
 import { TimelineView } from "@/features/timeline/timeline-view";
 import {
@@ -21,6 +22,7 @@ type Tab = (typeof TABS)[number];
 export default function ExecutionDetailPage() {
   const { id } = useParams<{ id: string }>();
   const [tab, setTab] = useState<Tab>("Overview");
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const { data, isLoading } = useExecution(id);
 
   if (isLoading) return <p className="text-sm text-neutral-500">Loading…</p>;
@@ -87,7 +89,13 @@ export default function ExecutionDetailPage() {
           )}
         </div>
       )}
-      {tab === "Graph" && <GraphView graphId={ex.graph_id} nodeStatus={nodeStatus} />}
+      {tab === "Graph" && (
+        <GraphView
+          graphId={ex.graph_id}
+          nodeStatus={nodeStatus}
+          onSelectNode={(name) => setSelectedNodeId(nodeStatus[name]?.id ?? null)}
+        />
+      )}
       {tab === "Timeline" && (
         <Card>
           <TimelineView executionId={id} nodes={data.nodes} />
@@ -97,6 +105,10 @@ export default function ExecutionDetailPage() {
       {tab === "LLM Calls" && <LlmCallsTab executionId={id} />}
       {tab === "Tool Calls" && <ToolCallsTab executionId={id} />}
       {tab === "Logs" && <LogsTab executionId={id} />}
+
+      {selectedNodeId && (
+        <NodeInspector nodeId={selectedNodeId} onClose={() => setSelectedNodeId(null)} />
+      )}
     </div>
   );
 }

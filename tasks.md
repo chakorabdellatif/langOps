@@ -196,9 +196,230 @@ is tagged.
 
 ---
 
+# Milestone v0.2 — Developer Experience
+
+Goal: transform LangOps from an execution viewer into an **interactive
+debugging platform** — understand, compare, and re-run LangGraph executions.
+Everything in this milestone is **deterministic** (no LLM calls, no recurring
+inference cost) and **additive** (no breaking semconv or API changes; old
+SDKs keep working against the new backend and vice versa).
+
+Ordering rationale: Phase 9 (graph inspection) is the highest-value UX win
+and creates the per-node data (tokens/cost/category) that Phases 10 and 12
+present; Phase 10 (comparison engine) is pure backend + presentation on top
+of data that already exists; Phase 11 (logs) requires an SDK release, so its
+SDK work ships together with Phase 12's SDK work in one `langops` 0.2.0.
+
+> **Contract changes (semconv 0.1.0 → 0.2.0, all additive — no `!` commit):**
+> - `langops.node.category` node-span attribute: `llm | tool | utility |
+>   router | conditional | checkpoint | subgraph` (SDK best-effort; backend
+>   infers a deterministic fallback when absent, so old SDKs still work)
+> - Topology payload v2: `nodes` entries may be objects
+>   `{id, category, metadata}` instead of bare strings; backend accepts both
+> - `langops.log` span event: `{level, logger, message, source}` +
+>   `langops.payload` for structured extras (source: `app | sdk | llm | tool`)
+> - `langops.execution.replay_of` execution-span attribute (UUID of the
+>   execution being replayed) + `langops.execution.overrides` event (JSON of
+>   replay modifications, redacted/truncated like any payload)
+> Update `docs/semantic-conventions.md` to 0.2.0 **first**, then mirror in
+> `sdk/src/langops/semconv.py` and the backend mapper constants — same
+> workflow as 0.1.0. Unknown attributes are already ignored by ingestion, so
+> mixed SDK/backend versions stay safe.
+
+## Phase 9 — Rich graph node inspection (M9) — highest priority
+
+Goal: the graph becomes the primary debugging surface — per-node status,
+duration, tokens, cost, retries at a glance; full inspector on click.
+
+### 9.1 Data foundation (backend + SDK)
+- [x] Migration (`0002_node_rollups`): `node_executions` gains
+      `input_tokens`, `output_tokens`, `total_cost` (nullable), `cost_status`,
+      and `category` (nullable); old rows render "utility"/"—" via API fallback
+- [x] Ingestion: per-node rollups recomputed idempotently from child
+      `llm_calls` across the whole execution (`_recompute_node_rollups`, same
+      never-increment pattern as execution rollups); `cost_status` aggregates
+      per node (any unknown child → `unknown`, never $0 — ADR-0002)
+- [x] Deterministic category inference (`domain/services/node_categorizer.py`,
+      pure + unit-tested): LLM child → `llm`; tool child (no LLM) → `tool`;
+      else `utility`; structural SDK categories always win
+- [x] SDK: `_topology` captures conditional-edge metadata from
+      `graph.get_graph()`, emits topology-v2 node/edge objects, and stamps
+      `langops.node.category` on conditional routers via the callback handler
+- [x] Extended `NodeView` DTO + `NodeSummaryResponse` (and dashboard types):
+      `category`, tokens, `total_cost`, `cost_status`, `models`, `tool_names`,
+      `state_changes` — enriched in `GetExecutionDetailService` via 3 batch
+      queries per execution, **no N+1 on hover**
+- [x] Tests: rollup idempotency, out-of-order LLM rollup, category-inference
+      matrix (API + pure unit), state-change surfacing
+
+### 9.2 Dashboard — graph as debugging surface
+- [x] Custom React Flow node (`GraphNode`): status color, duration, tokens,
+      cost, retry badge (`↻n`), category glyph + label
+- [x] Hover tooltip (CSS `group-hover`, data from `ExecutionDetail.nodes` —
+      no fetch on hover): status, duration, tokens, cost, model(s), category,
+      tools, state-change summary; non-LLM → "—"; failed → exception + retries
+- [x] Click → `NodeInspector` drawer fed by existing `GET /api/v1/nodes/{id}`
+- [x] Edge styling: conditional edges dashed + labeled from topology-v2
+- [x] Live updates reuse existing SSE cache invalidation (unchanged)
+- [x] `tsc` + `next lint` clean; topology normaliser accepts v1 (bare
+      strings/tuples) so 0.1.0-SDK executions still render
+
+**Accept when:** every node shows status, duration, tokens, cost, and category
+on the graph; hover shows the full tooltip without a network request; click
+opens the inspector; a failed node shows exception + retry info; old-SDK
+executions render without errors. ✅ (unit/API/tsc/lint verified; live
+browser render verified in the visit-city run at the end)
+
+## Phase 10 — Deterministic comparison engine (M10)
+
+Goal: comparing two executions answers "what changed and did it get better
+or worse" — state, structure, performance, and plain-language insights.
+Entirely rule-based; **never an LLM**. (Merges wishlist items 2 and 4 — the
+"better state diff" sections *are* the richer comparison.)
+
+- [ ] Domain service `ExecutionComparator` (pure, no I/O — unit-testable
+      like `StateDiffer`), composing four sections:
+      - **State changes** — reuse `StateDiffer` (added/modified/removed);
+        presentation improvement only, semantics unchanged
+      - **Execution changes** — node added/removed, execution-order change
+        (sequence comparison), retries added/removed, topology-hash change
+      - **Performance deltas** — duration, cost, total tokens, context size
+        (state `size_bytes` series), per-node latency; each as
+        `{a, b, delta, delta_pct}`; deltas involving `cost_status: unknown`
+        are marked incomparable, never treated as 0
+      - **LLM changes** — model changed, temperature changed, prompt
+        (messages payload) changed y/n + size delta, response length delta,
+        tool-call count change
+- [ ] Rule-based insight generator: threshold-driven observations from the
+      four sections ("Summary node latency increased 71%", "Context size
+      doubled before writer", "Topology changed", "1 retry added", "Tool
+      calls 2 → 5"); each insight cites its metric; thresholds in one
+      constants module — deterministic and snapshot-testable
+- [ ] Extend `CompareExecutionsService` + `/executions/compare` response
+      additively (keep `a`, `b`, `final_state_diff`; add `execution_changes`,
+      `performance`, `llm_changes`, `insights`)
+- [ ] Dashboard compare page: four-section layout (State / Execution /
+      Performance / Insights), delta chips (▲/▼ with good/bad coloring —
+      lower latency/cost is green), per-node latency table, insight list
+- [ ] "Compare with…" entry point from execution detail (pre-fills one side;
+      suggest same graph + thread)
+- [ ] Tests: comparator unit matrix (identical runs → empty sections; each
+      change class detected exactly once), insight snapshot tests, API
+      contract test, unknown-cost incomparability
+
+**Accept when:** comparing two fixture runs with a known injected difference
+(model swap + one retry + slower node) surfaces exactly the expected
+execution changes, performance deltas, and insights — reproducibly, with no
+LLM involved.
+
+## Phase 11 — Logs experience (M11)
+
+Goal: logs become a first-class debugging channel — today only exception
+events reach the `logs` table (always level `error`).
+
+- [ ] SDK: opt-in `LangOpsConfig(capture_logs=True)` installs a
+      `logging.Handler` that emits `langops.log` span events onto the
+      current active LangOps span (level, logger name, message, source
+      `app`); SDK-internal warnings emit with source `sdk`; events pass the
+      existing redaction hook + payload cap; fault-isolated like every other
+      capture path (a raising handler can never break the host app)
+- [ ] Ingestion: map `langops.log` events → `LogRecord` (in addition to
+      exception events); migration adds `logs.source` column (`app | sdk |
+      llm | tool | exception`); existing exception-derived rows classify as
+      `exception`
+- [ ] `SearchLogsService` + `GET /api/v1/logs`: filters `execution_id`
+      (optional — global search works too), `node_execution_id`, `level`,
+      `source`, `q` (ILIKE on message), time range; keyset pagination;
+      index on `(execution_id, timestamp)` + level/source
+- [ ] Dashboard Logs tab rebuilt: search box, level filter chips
+      (Errors / Warnings / All), source filter chips (App / SDK / LLM /
+      Tool), node filter dropdown; each row: timestamp, node, level badge,
+      message, expandable metadata (attributes JSON, execution/thread IDs,
+      stack trace via existing viewer)
+- [ ] Log-count badges: error/warning counts on the execution header and on
+      graph nodes (feeds Phase 9 tooltip)
+- [ ] Tests: handler fault-injection (SDK), log-event ingestion + source
+      classification, search filters + pagination, empty-state UX
+
+**Accept when:** an example app using stdlib `logging` shows its log lines
+in the dashboard attributed to the right node, filterable by level/source
+and searchable by text; capture disabled by default costs nothing.
+
+## Phase 12 — Execution replay, phases R1–R2 (M12)
+
+Goal: re-run a captured execution from the dashboard's data — exactly (R1)
+or with modifications (R2). Replay runs **in the user's environment via the
+SDK** (the backend never executes user code); the platform's job is
+supplying the recorded inputs/config and linking lineage. R3 (from
+checkpoint) and R4 (from arbitrary node) stay in the post-v0.2 backlog —
+per the design decision, replay ships *with* modifications or not at all.
+
+### R1 — exact replay
+- [ ] SDK `langops.replay(graph, execution_id, api_url=...)` + CLI
+      (`python -m langops replay <execution-id> --app module:graph`):
+      fetch recorded input + config (thread ID excluded by default — a
+      replay is a fresh thread unless `--same-thread`) from
+      `GET /executions/{id}`, re-invoke the local instrumented graph
+- [ ] Replay lineage: root span carries `langops.execution.replay_of`;
+      migration adds `executions.replay_of_execution_id` (nullable,
+      indexed); list/detail responses expose it
+- [ ] Dashboard: "Replay" panel on execution detail — copyable CLI command
+      (the dashboard cannot run user code; make that explicit in the UI),
+      replay-lineage links (original ⇄ replays), one-click "Compare with
+      original" (reuses Phase 10)
+- [ ] Guard: replaying an execution whose input was truncated
+      (`langops.truncated`) fails fast with a clear error, never replays a
+      partial input
+
+### R2 — replay with modifications
+- [ ] Overrides: `--input file.json` (replace initial input),
+      `--model <id>` + `--temperature <t>` (applied via a documented
+      model-patching hook `replay(..., model_factory=...)` and
+      `configurable` keys when the app reads them), message-level prompt
+      edit on the recorded initial input. **Out of scope, documented:**
+      rewriting prompt templates embedded in user code — LangOps can only
+      modify what flows through input/config
+- [ ] Overrides recorded on the new execution (`langops.execution.overrides`
+      event, redacted/truncated as usual); dashboard replay panel and
+      compare view surface "what was changed" alongside Phase 10 deltas
+- [ ] Tests: replay round-trip against a fake-model example (R1 output
+      matches original for a deterministic graph), override application
+      matrix, truncated-input guard, lineage ingestion + API exposure
+- [ ] Docs: replay guide in `docs/sdk.md` (capabilities *and* limits —
+      external APIs/tools re-execute for real; replay is experimentation,
+      not time travel)
+
+**Accept when:** for the simple-agent example, `langops replay <id>` yields
+a new execution linked to the original, and `--model`/`--input` overrides
+produce a modified run whose differences are visible in the Phase 10
+comparison view — closing the loop: inspect → compare → replay → compare.
+
+## Phase 13 — v0.2 hardening & release
+
+- [ ] `docs/semantic-conventions.md` 0.2.0 finalized; SDK/backend constants
+      verified mirror-identical; mixed-version compatibility test (0.1 SDK →
+      0.2 backend, and the reverse ingest-ignores-unknown path)
+- [ ] Per-component docs updated (sdk.md, backend.md, dashboard.md,
+      database.md schema changes); CHANGELOG for sdk 0.2.0 + backend 0.2.0
+- [ ] `make lint` / `make test` green on all packages; coverage holds on
+      backend domain + application (comparator + inference are pure and
+      cheap to cover)
+- [ ] `make e2e` extended: instrumented run with logs → inspect node badges
+      via API → compare two runs → replay via CLI → assert lineage
+- [ ] Version bump + tag `v0.2.0`; publish `langops` 0.2.0 (after the
+      pending 0.1.0 release ships)
+
+**Accept when:** clean machine: quickstart → run example twice → graph shows
+rich nodes → compare shows deterministic insights → replay with a model
+override produces a linked, comparable execution. No feature added a
+recurring LLM cost.
+
+---
+
 ## Post-MVP backlog (architecture §10 — do not start before 0.1.0)
 
-Prompt versioning · agent evaluation · execution replay / time travel ·
-human-in-the-loop · multi-project · auth/users · Kubernetes deployment ·
-partitioned/scale-out storage. Each maps to an existing seam; keep it that
-way — new features must be additive.
+Prompt versioning · agent evaluation · **replay R3/R4** (from checkpoint /
+from arbitrary node — requires checkpoint state rehydration; R1/R2 land in
+v0.2 Phase 12) · human-in-the-loop · multi-project · auth/users · Kubernetes
+deployment · partitioned/scale-out storage. Each maps to an existing seam;
+keep it that way — new features must be additive.

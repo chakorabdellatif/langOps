@@ -71,6 +71,12 @@ class NodeExecution:
     started_at: datetime | None = None
     ended_at: datetime | None = None
     duration_ms: int | None = None
+    # v0.2: category (llm|tool|utility|router|conditional|checkpoint|subgraph)
+    # and per-node rollups recomputed from child LLM calls during ingestion.
+    # ``category`` is None until inferred; the API renders "utility" as fallback.
+    category: str | None = None
+    tokens: TokenUsage = field(default_factory=TokenUsage)
+    cost: Cost = field(default_factory=Cost.unknown)
 
 
 @dataclass

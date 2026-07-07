@@ -4,7 +4,7 @@ Never invent an attribute name inline: add it to the conventions document
 first, then here, then to the backend constants. CI fails on drift.
 """
 
-SCHEMA_VERSION = "0.1.0"
+SCHEMA_VERSION = "0.2.0"
 
 # ── Resource attributes ────────────────────────────────────────────────
 SDK_VERSION = "langops.sdk.version"
@@ -39,6 +39,21 @@ EVENT_EXECUTION_OUTPUT = "langops.execution.output"
 NODE_NAME = "langops.node.name"
 NODE_SEQUENCE = "langops.node.sequence"
 NODE_RETRY_COUNT = "langops.node.retry_count"
+# Node category (v0.2). SDK sends structural categories it can derive from the
+# topology (router/conditional/subgraph); the backend infers llm/tool/utility
+# from child spans when this is absent, so 0.1 SDKs stay compatible.
+NODE_CATEGORY = "langops.node.category"
+
+
+class NodeCategory:
+    LLM = "llm"
+    TOOL = "tool"
+    UTILITY = "utility"
+    ROUTER = "router"
+    CONDITIONAL = "conditional"
+    CHECKPOINT = "checkpoint"
+    SUBGRAPH = "subgraph"
+
 
 # Node span events
 EVENT_STATE_INPUT = "langops.state.input"
@@ -66,6 +81,28 @@ EVENT_LLM_RESPONSE = "langops.llm.response"
 TOOL_NAME = "langops.tool.name"
 EVENT_TOOL_INPUT = "langops.tool.input"
 EVENT_TOOL_OUTPUT = "langops.tool.output"
+
+# ── Structured logs (v0.2) ─────────────────────────────────────────────
+# Emitted onto the active LangOps span when log capture is enabled; the
+# payload (message + extras) rides under PAYLOAD like any other event.
+EVENT_LOG = "langops.log"
+LOG_LEVEL = "langops.log.level"
+LOG_LOGGER = "langops.log.logger"
+LOG_SOURCE = "langops.log.source"
+
+
+class LogSource:
+    APP = "app"
+    SDK = "sdk"
+    LLM = "llm"
+    TOOL = "tool"
+    EXCEPTION = "exception"
+
+
+# ── Execution replay (v0.2) ────────────────────────────────────────────
+# Set on a replayed execution's root span; links it to the original run.
+EXECUTION_REPLAY_OF = "langops.execution.replay_of"
+EVENT_EXECUTION_OVERRIDES = "langops.execution.overrides"
 
 # ── Cross-cutting ──────────────────────────────────────────────────────
 # Every payload span event carries its JSON body under this event attribute
