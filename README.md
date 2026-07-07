@@ -280,6 +280,16 @@ Future releases will support Kubernetes deployments.
 
 ---
 
+# Documentation
+
+Full docs live in [`docs/`](docs/README.md):
+
+- **[Setup & Usage](docs/setup.md)** — run the stack and instrument your own app
+- Per-component guides: **[SDK](docs/sdk.md)** · **[Backend](docs/backend.md)** · **[Dashboard](docs/dashboard.md)** · **[Collector](docs/collector.md)** · **[Examples](docs/examples.md)**
+- Reference: **[Architecture](docs/architecture.md)** · **[Semantic Conventions](docs/semantic-conventions.md)** · **[Database](docs/database.md)** · **[ADRs](docs/adr/)**
+
+---
+
 # Getting Started
 
 ## Clone the repository
