@@ -155,6 +155,15 @@ def _map_execution(trace: MappedTrace, span: ParsedSpan) -> None:
         resumed=bool(span.attributes.get(semconv.CHECKPOINT_RESUMED, False)),
     )
 
+    replay_of = span.attributes.get(semconv.EXECUTION_REPLAY_OF)
+    if replay_of:
+        try:
+            execution.replay_of_execution_id = uuid.UUID(str(replay_of))
+        except ValueError:
+            execution.replay_of_execution_id = None
+        overrides = _event_payload(span, semconv.EVENT_EXECUTION_OVERRIDES)
+        execution.replay_overrides = overrides if isinstance(overrides, dict) else None
+
     graph_name = span.attributes.get(semconv.GRAPH_NAME)
     if graph_name:
         topology = _event_payload(span, semconv.EVENT_GRAPH_TOPOLOGY)

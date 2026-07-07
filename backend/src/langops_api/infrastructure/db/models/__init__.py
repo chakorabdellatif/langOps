@@ -55,6 +55,7 @@ class ExecutionModel(Base):
         sa.Index("ix_executions_project_started", "project_id", "started_at"),
         sa.Index("ix_executions_thread_started", "thread_id", "started_at"),
         sa.Index("ix_executions_graph_started", "graph_id", "started_at"),
+        sa.Index("ix_executions_replay_of", "replay_of_execution_id"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True)
@@ -76,6 +77,9 @@ class ExecutionModel(Base):
     total_output_tokens: Mapped[int] = mapped_column(sa.Integer, default=0)
     total_cost: Mapped[Decimal] = mapped_column(sa.Numeric(12, 6), default=Decimal("0"))
     sdk_version: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    # v0.2 replay lineage (plain UUID, no FK — see migration 0004).
+    replay_of_execution_id: Mapped[uuid.UUID | None] = mapped_column(sa.Uuid, nullable=True)
+    replay_overrides: Mapped[Any | None] = mapped_column(JSONType, nullable=True)
 
 
 class NodeExecutionModel(Base):

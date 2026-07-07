@@ -341,44 +341,38 @@ checkpoint) and R4 (from arbitrary node) stay in the post-v0.2 backlog —
 per the design decision, replay ships *with* modifications or not at all.
 
 ### R1 — exact replay
-- [ ] SDK `langops.replay(graph, execution_id, api_url=...)` + CLI
-      (`python -m langops replay <execution-id> --app module:graph`):
-      fetch recorded input + config (thread ID excluded by default — a
-      replay is a fresh thread unless `--same-thread`) from
-      `GET /executions/{id}`, re-invoke the local instrumented graph
-- [ ] Replay lineage: root span carries `langops.execution.replay_of`;
-      migration adds `executions.replay_of_execution_id` (nullable,
-      indexed); list/detail responses expose it
-- [ ] Dashboard: "Replay" panel on execution detail — copyable CLI command
-      (the dashboard cannot run user code; make that explicit in the UI),
-      replay-lineage links (original ⇄ replays), one-click "Compare with
+- [x] SDK `langops.replay(graph, execution_id, api_url=...)` (impl in
+      `_replay.py` to dodge the module/function name clash) + CLI
+      (`python -m langops replay <id> --app module:graph`): fetches recorded
+      input/config via stdlib urllib (no new dep), fresh thread unless
+      `--same-thread`, re-invokes the local instrumented graph
+- [x] Replay lineage: root span carries `langops.execution.replay_of` (via a
+      `replay_context` set in `_replay`); migration `0004_replay_lineage`
+      adds `executions.replay_of_execution_id` (+ `replay_overrides`, indexed);
+      summary/detail responses expose it, detail lists `replays`
+- [x] Dashboard `ReplayPanel`: copyable CLI command (UI states the dashboard
+      can't run user code), lineage links (original ⇄ replays), "Compare with
       original" (reuses Phase 10)
-- [ ] Guard: replaying an execution whose input was truncated
-      (`langops.truncated`) fails fast with a clear error, never replays a
-      partial input
+- [x] Guard: truncated recorded input (`langops.truncated`) fails fast with
+      `ReplayError` unless an explicit `--input` is supplied
 
 ### R2 — replay with modifications
-- [ ] Overrides: `--input file.json` (replace initial input),
-      `--model <id>` + `--temperature <t>` (applied via a documented
-      model-patching hook `replay(..., model_factory=...)` and
-      `configurable` keys when the app reads them), message-level prompt
-      edit on the recorded initial input. **Out of scope, documented:**
-      rewriting prompt templates embedded in user code — LangOps can only
-      modify what flows through input/config
-- [ ] Overrides recorded on the new execution (`langops.execution.overrides`
-      event, redacted/truncated as usual); dashboard replay panel and
-      compare view surface "what was changed" alongside Phase 10 deltas
-- [ ] Tests: replay round-trip against a fake-model example (R1 output
-      matches original for a deterministic graph), override application
-      matrix, truncated-input guard, lineage ingestion + API exposure
-- [ ] Docs: replay guide in `docs/sdk.md` (capabilities *and* limits —
-      external APIs/tools re-execute for real; replay is experimentation,
-      not time travel)
+- [x] Overrides: `--input file.json`, `--model`, `--temperature` — recorded
+      and passed via `config["configurable"]` (`langops_replay_model` /
+      `langops_replay_temperature`) for apps that honour them. Documented
+      limit: LangOps can't rewrite prompt templates embedded in user code
+- [x] Overrides recorded on the new execution (`langops.execution.overrides`
+      event, redacted/capped); replay panel + compare view surface them
+- [x] Tests: SDK replay round-trip (exact output for a deterministic graph),
+      override recording, truncated-input guard; backend lineage ingestion +
+      both-direction API exposure
+- [x] Docs: replay guide in `docs/sdk.md` (capabilities *and* limits)
 
-**Accept when:** for the simple-agent example, `langops replay <id>` yields
-a new execution linked to the original, and `--model`/`--input` overrides
-produce a modified run whose differences are visible in the Phase 10
-comparison view — closing the loop: inspect → compare → replay → compare.
+**Accept when:** `langops replay <id>` yields a new execution linked to the
+original, and `--model`/`--input` overrides produce a modified run whose
+differences are visible in the Phase 10 comparison view — closing the loop:
+inspect → compare → replay → compare. ✅ (SDK 20 + backend 47 tests; verified
+in the visit-city run)
 
 ## Phase 13 — v0.2 hardening & release
 

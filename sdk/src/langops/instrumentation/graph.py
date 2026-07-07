@@ -25,7 +25,12 @@ from langops import semconv
 from langops.config import LangOpsConfig
 from langops.instrumentation.callbacks import LangOpsCallbackHandler
 from langops.instrumentation.checkpointer import InstrumentedCheckpointer
-from langops.instrumentation.runtime import RunContext, add_payload_event, current_run
+from langops.instrumentation.runtime import (
+    RunContext,
+    add_payload_event,
+    current_run,
+    replay_context,
+)
 
 logger = logging.getLogger("langops")
 
@@ -85,6 +90,15 @@ def instrument_graph(graph: Any, sdk_config: LangOpsConfig, provider: TracerProv
             root.set_attribute(semconv.CHECKPOINT_RESUMED, resumed)
             if parent_checkpoint:
                 run.parent_checkpoint_id = parent_checkpoint
+
+            # Replay lineage (v0.2): stamp the original execution + overrides.
+            replay = replay_context.get()
+            if replay is not None:
+                root.set_attribute(semconv.EXECUTION_REPLAY_OF, replay.replay_of)
+                if replay.overrides:
+                    add_payload_event(
+                        root, semconv.EVENT_EXECUTION_OVERRIDES, replay.overrides, sdk_config
+                    )
 
             handler = LangOpsCallbackHandler(
                 tracer, execution_id, root, sdk_config, node_categories=node_categories

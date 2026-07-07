@@ -55,6 +55,7 @@ class ExecutionSummaryResponse(BaseModel):
     total_output_tokens: int
     total_cost: float
     sdk_version: str | None
+    replay_of_execution_id: UUID | None
 
     @classmethod
     def from_entity(cls, execution: Execution) -> ExecutionSummaryResponse:
@@ -73,6 +74,7 @@ class ExecutionSummaryResponse(BaseModel):
             total_output_tokens=execution.tokens.output_tokens,
             total_cost=float(execution.total_cost),
             sdk_version=execution.sdk_version,
+            replay_of_execution_id=execution.replay_of_execution_id,
         )
 
 
@@ -169,6 +171,13 @@ class NodeSummaryResponse(BaseModel):
         )
 
 
+class ReplayLinkResponse(BaseModel):
+    id: UUID
+    status: str
+    started_at: datetime | None
+    overrides: dict[str, Any] | None
+
+
 class ExecutionDetailResponse(BaseModel):
     execution: ExecutionSummaryResponse
     graph_name: str | None
@@ -177,6 +186,10 @@ class ExecutionDetailResponse(BaseModel):
     input: Any | None
     output: Any | None
     nodes: list[NodeSummaryResponse]
+    # v0.2 replay lineage.
+    replay_of_execution_id: UUID | None
+    replay_overrides: dict[str, Any] | None
+    replays: list[ReplayLinkResponse]
 
     @classmethod
     def from_dto(cls, detail: ExecutionDetail) -> ExecutionDetailResponse:
@@ -189,6 +202,17 @@ class ExecutionDetailResponse(BaseModel):
             input=execution.input,
             output=execution.output,
             nodes=[NodeSummaryResponse.from_view(n) for n in detail.nodes],
+            replay_of_execution_id=execution.replay_of_execution_id,
+            replay_overrides=execution.replay_overrides,
+            replays=[
+                ReplayLinkResponse(
+                    id=r.id,
+                    status=r.status.value,
+                    started_at=r.started_at,
+                    overrides=r.replay_overrides,
+                )
+                for r in detail.replays
+            ],
         )
 
 

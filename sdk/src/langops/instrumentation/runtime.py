@@ -37,6 +37,17 @@ class RunContext:
 current_run: ContextVar[RunContext | None] = ContextVar("langops_current_run", default=None)
 
 
+@dataclass(frozen=True)
+class ReplayInfo:
+    """Set by ``langops.replay`` so the graph wrapper stamps replay lineage."""
+
+    replay_of: str
+    overrides: dict[str, Any]
+
+
+replay_context: ContextVar[ReplayInfo | None] = ContextVar("langops_replay", default=None)
+
+
 def add_payload_event(
     span: Span,
     event_name: str,

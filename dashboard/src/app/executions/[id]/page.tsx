@@ -7,6 +7,7 @@ import { useParams } from "next/navigation";
 import { Card, Cost, Duration, EmptyState, JsonViewer, StatusBadge, Tokens } from "@/components/data";
 import { GraphView } from "@/features/graph/graph-view";
 import { NodeInspector } from "@/features/graph/node-inspector";
+import { ReplayPanel } from "@/features/replay/replay-panel";
 import { StateView } from "@/features/state/state-view";
 import { TimelineView } from "@/features/timeline/timeline-view";
 import {
@@ -95,6 +96,9 @@ export default function ExecutionDetailPage() {
               </Card>
             </div>
           )}
+          <div className="md:col-span-2">
+            <ReplayPanel detail={data} />
+          </div>
         </div>
       )}
       {tab === "Graph" && (

@@ -18,9 +18,9 @@ from langops.config import LangOpsConfig
 if TYPE_CHECKING:
     from opentelemetry.sdk.trace import TracerProvider
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
-__all__ = ["LangOpsConfig", "instrument", "__version__"]
+__all__ = ["LangOpsConfig", "instrument", "replay", "__version__"]
 
 _INSTRUMENTED = "__langops_instrumented__"
 
@@ -70,3 +70,10 @@ def instrument(
         )
 
     return graph
+
+
+def replay(graph: Any, execution_id: str, **kwargs: Any) -> Any:
+    """Re-run a captured execution on ``graph`` (see :mod:`langops._replay`)."""
+    from langops._replay import replay as _replay
+
+    return _replay(graph, execution_id, **kwargs)
