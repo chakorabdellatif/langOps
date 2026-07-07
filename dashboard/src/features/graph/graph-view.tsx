@@ -46,18 +46,33 @@ export function GraphView({
       const d = depth.get(name) ?? 0;
       const row = rowByDepth.get(d) ?? 0;
       rowByDepth.set(d, row + 1);
-      const status = nodeStatus[name]?.status;
+      const node = nodeStatus[name];
+      const status = node?.status;
+      const badges: string[] = [];
+      if (node?.duration_ms != null) badges.push(`${node.duration_ms} ms`);
+      if (node && node.retry_count > 0) badges.push(`↻${node.retry_count}`);
+      if (node?.error) badges.push("⚠ error");
       return {
         id: name,
-        position: { x: d * 200, y: row * 90 },
-        data: { label: name },
+        position: { x: d * 210, y: row * 96 },
+        data: {
+          label: (
+            <div className="text-left">
+              <div className="font-medium">{name}</div>
+              {badges.length > 0 && (
+                <div className="mt-0.5 text-[10px] opacity-80">{badges.join(" · ")}</div>
+              )}
+            </div>
+          ),
+        },
         style: {
           background: status ? STATUS_BG[status] ?? "#1f2937" : "#111827",
           color: "#e5e7eb",
-          border: "1px solid #374151",
+          border: node?.error ? "1px solid #ef4444" : "1px solid #374151",
           borderRadius: 8,
           fontSize: 12,
-          width: 150,
+          width: 160,
+          padding: 6,
         },
       };
     });

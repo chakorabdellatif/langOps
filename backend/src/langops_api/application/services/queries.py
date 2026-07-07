@@ -11,7 +11,7 @@ from langops_api.application.dto import (
     NodeDetail,
     TimelineEntry,
 )
-from langops_api.domain.entities import LogRecord
+from langops_api.domain.entities import LlmCall, LogRecord, ToolCall
 from langops_api.domain.errors import ExecutionNotFound, NodeExecutionNotFound
 from langops_api.domain.repositories import (
     ExecutionRepository,
@@ -135,6 +135,16 @@ class GetExecutionDetailService:
         if await self._executions.get(execution_id) is None:
             raise ExecutionNotFound(f"Execution {execution_id} not found")
         return await self._logs.list_by_execution(execution_id)
+
+    async def llm_calls(self, execution_id: UUID) -> list[LlmCall]:
+        if await self._executions.get(execution_id) is None:
+            raise ExecutionNotFound(f"Execution {execution_id} not found")
+        return await self._llm_calls.list_by_execution(execution_id)
+
+    async def tool_calls(self, execution_id: UUID) -> list[ToolCall]:
+        if await self._executions.get(execution_id) is None:
+            raise ExecutionNotFound(f"Execution {execution_id} not found")
+        return await self._tool_calls.list_by_execution(execution_id)
 
 
 class GetNodeDetailService:

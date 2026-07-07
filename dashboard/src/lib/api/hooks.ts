@@ -6,15 +6,18 @@ import { queryKeys } from "@/lib/query-keys";
 import { apiFetch } from "./client";
 import type {
   CostSummary,
+  ExecutionComparison,
   ExecutionDetail,
   ExecutionList,
   GraphSummary,
   GraphTopology,
+  LlmCall,
   LogEntry,
   MetricsOverview,
   NodeDetail,
   StateEvolution,
   TimelineEntry,
+  ToolCall,
 } from "./types";
 
 export interface ExecutionFilters {
@@ -69,6 +72,20 @@ export function useExecutionLogs(id: string) {
   });
 }
 
+export function useExecutionLlmCalls(id: string) {
+  return useQuery({
+    queryKey: [...queryKeys.executions.detail(id), "llm-calls"],
+    queryFn: () => apiFetch<LlmCall[]>(`/api/v1/executions/${id}/llm-calls`),
+  });
+}
+
+export function useExecutionToolCalls(id: string) {
+  return useQuery({
+    queryKey: [...queryKeys.executions.detail(id), "tool-calls"],
+    queryFn: () => apiFetch<ToolCall[]>(`/api/v1/executions/${id}/tool-calls`),
+  });
+}
+
 export function useNode(id: string | null) {
   return useQuery({
     queryKey: queryKeys.nodes.detail(id ?? ""),
@@ -104,5 +121,14 @@ export function useMetrics() {
     queryKey: queryKeys.metrics.overview({}),
     queryFn: () => apiFetch<MetricsOverview>("/api/v1/metrics/overview"),
     refetchInterval: 10000,
+  });
+}
+
+export function useComparison(a: string | null, b: string | null) {
+  return useQuery({
+    queryKey: queryKeys.executions.compare(a ?? "", b ?? ""),
+    queryFn: () =>
+      apiFetch<ExecutionComparison>(`/api/v1/executions/compare?a=${a}&b=${b}`),
+    enabled: Boolean(a && b),
   });
 }

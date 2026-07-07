@@ -70,6 +70,17 @@ class MetricsOverview:
     failed: int
     running: int
     failure_rate: float
+    avg_latency_ms: int | None
     latency_p50_ms: int | None
     latency_p95_ms: int | None
     latency_p99_ms: int | None
+
+
+@dataclass
+class ExecutionComparison:
+    """Side-by-side of two executions (the 'diff two runs' differentiator)."""
+
+    a: ExecutionDetail
+    b: ExecutionDetail
+    # StateDiff of the two final outputs (added/modified/removed), or None.
+    final_state_diff: dict[str, object] | None

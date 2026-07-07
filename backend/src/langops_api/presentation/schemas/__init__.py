@@ -13,6 +13,7 @@ from uuid import UUID
 from pydantic import BaseModel
 
 from langops_api.application.dto import (
+    ExecutionComparison,
     ExecutionDetail,
     ExecutionPage,
     MetricsOverview,
@@ -366,6 +367,7 @@ class MetricsOverviewResponse(BaseModel):
     failed: int
     running: int
     failure_rate: float
+    avg_latency_ms: int | None
     latency_p50_ms: int | None
     latency_p95_ms: int | None
     latency_p99_ms: int | None
@@ -373,3 +375,17 @@ class MetricsOverviewResponse(BaseModel):
     @classmethod
     def from_dto(cls, metrics: MetricsOverview) -> MetricsOverviewResponse:
         return cls(**metrics.__dict__)
+
+
+class ExecutionComparisonResponse(BaseModel):
+    a: ExecutionDetailResponse
+    b: ExecutionDetailResponse
+    final_state_diff: dict[str, Any] | None
+
+    @classmethod
+    def from_dto(cls, comparison: ExecutionComparison) -> ExecutionComparisonResponse:
+        return cls(
+            a=ExecutionDetailResponse.from_dto(comparison.a),
+            b=ExecutionDetailResponse.from_dto(comparison.b),
+            final_state_diff=comparison.final_state_diff,
+        )

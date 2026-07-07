@@ -10,6 +10,7 @@ export const queryKeys = {
     timeline: (id: string) => ["executions", "timeline", id] as const,
     state: (id: string) => ["executions", "state", id] as const,
     logs: (id: string) => ["executions", "logs", id] as const,
+    compare: (a: string, b: string) => ["executions", "compare", a, b] as const,
   },
   nodes: {
     detail: (id: string) => ["nodes", "detail", id] as const,

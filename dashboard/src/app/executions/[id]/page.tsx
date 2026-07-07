@@ -5,19 +5,22 @@ import { useParams } from "next/navigation";
 
 import { Card, Cost, Duration, EmptyState, JsonViewer, StatusBadge, Tokens } from "@/components/data";
 import { GraphView } from "@/features/graph/graph-view";
-import { NodeInspector } from "@/features/llm-calls/node-inspector";
 import { StateView } from "@/features/state/state-view";
 import { TimelineView } from "@/features/timeline/timeline-view";
-import { useExecution, useExecutionLogs } from "@/lib/api/hooks";
+import {
+  useExecution,
+  useExecutionLlmCalls,
+  useExecutionLogs,
+  useExecutionToolCalls,
+} from "@/lib/api/hooks";
 import type { NodeSummary } from "@/lib/api/types";
 
-const TABS = ["Graph", "Timeline", "State", "Nodes", "Logs"] as const;
+const TABS = ["Overview", "Graph", "Timeline", "State", "LLM Calls", "Tool Calls", "Logs"] as const;
 type Tab = (typeof TABS)[number];
 
 export default function ExecutionDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const [tab, setTab] = useState<Tab>("Graph");
-  const [selectedNode, setSelectedNode] = useState<string | null>(null);
+  const [tab, setTab] = useState<Tab>("Overview");
   const { data, isLoading } = useExecution(id);
 
   if (isLoading) return <p className="text-sm text-neutral-500">Loading…</p>;
@@ -67,6 +70,23 @@ export default function ExecutionDetailPage() {
         ))}
       </div>
 
+      {tab === "Overview" && (
+        <div className="grid gap-4 md:grid-cols-2">
+          <Card title="Input">
+            <JsonViewer value={data.input} />
+          </Card>
+          <Card title="Output">
+            <JsonViewer value={data.output} />
+          </Card>
+          {ex.status === "failed" && data.error && (
+            <div className="md:col-span-2">
+              <Card title="Error">
+                <JsonViewer value={data.error} />
+              </Card>
+            </div>
+          )}
+        </div>
+      )}
       {tab === "Graph" && <GraphView graphId={ex.graph_id} nodeStatus={nodeStatus} />}
       {tab === "Timeline" && (
         <Card>
@@ -74,37 +94,9 @@ export default function ExecutionDetailPage() {
         </Card>
       )}
       {tab === "State" && <StateView executionId={id} />}
-      {tab === "Nodes" && (
-        <div className="grid gap-4 md:grid-cols-[240px_1fr]">
-          <Card title="Nodes">
-            <ul className="space-y-1">
-              {data.nodes.map((n) => (
-                <li key={n.id}>
-                  <button
-                    onClick={() => setSelectedNode(n.id)}
-                    className={`flex w-full items-center justify-between rounded px-2 py-1.5 text-left text-sm ${
-                      selectedNode === n.id ? "bg-neutral-800" : "hover:bg-neutral-900"
-                    }`}
-                  >
-                    <span>
-                      {n.sequence}. {n.node_name}
-                    </span>
-                    <StatusBadge status={n.status} />
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </Card>
-          <NodeInspector nodeId={selectedNode} />
-        </div>
-      )}
+      {tab === "LLM Calls" && <LlmCallsTab executionId={id} />}
+      {tab === "Tool Calls" && <ToolCallsTab executionId={id} />}
       {tab === "Logs" && <LogsTab executionId={id} />}
-
-      {(ex.status === "failed" && data.error) && (
-        <Card title="Error">
-          <JsonViewer value={data.error} />
-        </Card>
-      )}
     </div>
   );
 }
@@ -133,5 +125,68 @@ function LogsTab({ executionId }: { executionId: string }) {
         ))}
       </div>
     </Card>
+  );
+}
+
+function LlmCallsTab({ executionId }: { executionId: string }) {
+  const { data, isLoading } = useExecutionLlmCalls(executionId);
+  if (isLoading) return <p className="text-sm text-neutral-500">Loading…</p>;
+  if (!data || data.length === 0) return <EmptyState>No LLM calls.</EmptyState>;
+  return (
+    <div className="space-y-4">
+      {data.map((call) => (
+        <Card key={call.id} title={`${call.provider ?? "?"} · ${call.model ?? "unknown model"}`}>
+          <div className="mb-3 flex flex-wrap gap-4 text-xs text-neutral-400">
+            <span>
+              in <Tokens n={call.input_tokens} /> / out <Tokens n={call.output_tokens} />
+            </span>
+            <span>
+              cost <Cost usd={call.total_cost} status={call.cost_status} />
+            </span>
+            <span>
+              <Duration ms={call.latency_ms} />
+            </span>
+          </div>
+          <div className="grid gap-3 md:grid-cols-2">
+            <div>
+              <div className="mb-1 text-xs uppercase text-neutral-500">Messages</div>
+              <JsonViewer value={call.messages} />
+            </div>
+            <div>
+              <div className="mb-1 text-xs uppercase text-neutral-500">Response</div>
+              <JsonViewer value={call.response} />
+            </div>
+          </div>
+        </Card>
+      ))}
+    </div>
+  );
+}
+
+function ToolCallsTab({ executionId }: { executionId: string }) {
+  const { data, isLoading } = useExecutionToolCalls(executionId);
+  if (isLoading) return <p className="text-sm text-neutral-500">Loading…</p>;
+  if (!data || data.length === 0) return <EmptyState>No tool calls.</EmptyState>;
+  return (
+    <div className="space-y-4">
+      {data.map((call) => (
+        <Card key={call.id} title={`Tool · ${call.tool_name}`}>
+          <div className="mb-3 flex items-center gap-3 text-xs text-neutral-400">
+            <StatusBadge status={call.status} />
+            <Duration ms={call.duration_ms} />
+          </div>
+          <div className="grid gap-3 md:grid-cols-2">
+            <div>
+              <div className="mb-1 text-xs uppercase text-neutral-500">Input</div>
+              <JsonViewer value={call.input} />
+            </div>
+            <div>
+              <div className="mb-1 text-xs uppercase text-neutral-500">Output</div>
+              <JsonViewer value={call.output} />
+            </div>
+          </div>
+        </Card>
+      ))}
+    </div>
   );
 }

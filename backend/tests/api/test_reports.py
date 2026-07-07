@@ -147,3 +147,4 @@ async def test_metrics_overview(client: httpx.AsyncClient, ingested: dict[str, A
     assert metrics["succeeded"] == 1
     assert metrics["failure_rate"] == 0.0
     assert metrics["latency_p50_ms"] == 1500
+    assert metrics["avg_latency_ms"] == 1500

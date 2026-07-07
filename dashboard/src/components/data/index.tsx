@@ -1,5 +1,7 @@
+"use client";
+
 import Link from "next/link";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 
 const STATUS_COLORS: Record<string, string> = {
   succeeded: "bg-emerald-500/15 text-emerald-300 ring-emerald-500/30",
@@ -41,11 +43,33 @@ export function RelativeTime({ iso }: { iso: string | null }) {
 }
 
 export function JsonViewer({ value }: { value: unknown }) {
+  const [collapsed, setCollapsed] = useState(false);
+  const [copied, setCopied] = useState(false);
   if (value == null) return <p className="text-sm text-neutral-500">No data.</p>;
+  const text = JSON.stringify(value, null, 2);
+
+  const copy = () => {
+    void navigator.clipboard?.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1200);
+  };
+
   return (
-    <pre className="max-h-96 overflow-auto rounded bg-neutral-900/70 p-3 text-xs text-neutral-300 ring-1 ring-neutral-800">
-      {JSON.stringify(value, null, 2)}
-    </pre>
+    <div className="rounded ring-1 ring-neutral-800">
+      <div className="flex items-center justify-between border-b border-neutral-800 bg-neutral-900/70 px-2 py-1 text-xs text-neutral-400">
+        <button onClick={() => setCollapsed((c) => !c)} className="hover:text-neutral-200">
+          {collapsed ? "▸ expand" : "▾ collapse"}
+        </button>
+        <button onClick={copy} className="hover:text-neutral-200">
+          {copied ? "copied" : "copy"}
+        </button>
+      </div>
+      {!collapsed && (
+        <pre className="max-h-96 overflow-auto bg-neutral-900/70 p-3 text-xs text-neutral-300">
+          {text}
+        </pre>
+      )}
+    </div>
   );
 }
 
