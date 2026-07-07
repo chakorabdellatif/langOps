@@ -45,6 +45,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
             async with container.engine.begin() as conn:
                 await conn.run_sync(Base.metadata.create_all)
+        await container.ensure_default_project()
         app.state.container = container
         yield
         await container.dispose()
