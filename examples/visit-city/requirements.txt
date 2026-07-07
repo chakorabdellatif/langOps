@@ -1,0 +1,5 @@
+# The LangOps SDK (langgraph + langchain-core come with it):
+#   pip install -e ../../sdk
+langchain-openai>=0.2      # gpt-4o-mini
+httpx>=0.27                # Open-Meteo weather (no API key)
+redis>=5.0                 # per-city result cache

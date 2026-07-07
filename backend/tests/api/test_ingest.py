@@ -183,6 +183,21 @@ async def test_unknown_execution_returns_404(client: httpx.AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
+async def test_gzip_encoded_payload_ingests(client: httpx.AsyncClient) -> None:
+    # OTLP exporters (incl. the Collector) gzip payloads by default.
+    import gzip
+
+    body = gzip.compress(json.dumps(_otlp_trace()).encode())
+    response = await client.post(
+        "/v1/traces",
+        content=body,
+        headers={"content-type": "application/json", "content-encoding": "gzip"},
+    )
+    assert response.status_code == 200
+    assert (await client.get("/api/v1/executions")).json()["total"] == 1
+
+
+@pytest.mark.asyncio
 async def test_oversized_payload_rejected(client: httpx.AsyncClient) -> None:
     # Default limit is 4 MiB; exceed it with junk bytes.
     huge = b"x" * (4_194_304 + 1)
