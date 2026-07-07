@@ -87,10 +87,12 @@ class GetExecutionDetailService:
         graph = await self._graphs.get(execution.graph_id) if execution.graph_id else None
         nodes = await self._nodes.list_by_execution(execution_id)
         views = await self._build_node_views(execution_id, nodes)
+        replays = await self._executions.list_replays_of(execution_id)
         return ExecutionDetail(
             execution=execution,
             graph_name=graph.name if graph else None,
             nodes=views,
+            replays=replays,
         )
 
     async def _build_node_views(

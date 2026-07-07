@@ -44,6 +44,10 @@ class ExecutionRepository(Protocol):
 
     async def get_by_trace_id(self, trace_id: str) -> Execution | None: ...
 
+    async def list_replays_of(self, execution_id: UUID) -> list[Execution]:
+        """Executions that replayed ``execution_id`` (newest first)."""
+        ...
+
     async def upsert(self, execution: Execution, *, enrich_only: bool = False) -> Execution:
         """Insert by trace_id or merge non-empty fields into the existing row.
 

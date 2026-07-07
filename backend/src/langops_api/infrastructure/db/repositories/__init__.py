@@ -70,6 +70,8 @@ def _execution_to_entity(row: ExecutionModel) -> Execution:
         tokens=TokenUsage(row.total_input_tokens, row.total_output_tokens),
         total_cost=Decimal(row.total_cost or 0),
         sdk_version=row.sdk_version,
+        replay_of_execution_id=row.replay_of_execution_id,
+        replay_overrides=row.replay_overrides,
     )
 
 
@@ -349,8 +351,24 @@ class PostgresExecutionRepository:
                 execution.duration_ms if execution.duration_ms is not None else row.duration_ms
             )
             row.sdk_version = execution.sdk_version or row.sdk_version
+            row.replay_of_execution_id = (
+                execution.replay_of_execution_id or row.replay_of_execution_id
+            )
+            row.replay_overrides = (
+                execution.replay_overrides
+                if execution.replay_overrides is not None
+                else row.replay_overrides
+            )
         await self._session.flush()
         return _execution_to_entity(row)
+
+    async def list_replays_of(self, execution_id: UUID) -> list[Execution]:
+        rows = await self._session.scalars(
+            sa.select(ExecutionModel)
+            .where(ExecutionModel.replay_of_execution_id == execution_id)
+            .order_by(ExecutionModel.started_at.desc().nulls_last())
+        )
+        return [_execution_to_entity(r) for r in rows]
 
     async def update_rollups(
         self, execution_id: UUID, tokens: TokenUsage, total_cost: Decimal

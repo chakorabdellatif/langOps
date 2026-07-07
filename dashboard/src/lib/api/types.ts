@@ -18,6 +18,7 @@ export interface ExecutionSummary {
   total_output_tokens: number;
   total_cost: number;
   sdk_version: string | null;
+  replay_of_execution_id: string | null;
 }
 
 export interface ExecutionList {
@@ -64,6 +65,13 @@ export interface NodeSummary {
   state_changes: NodeStateChanges;
 }
 
+export interface ReplayLink {
+  id: string;
+  status: string;
+  started_at: string | null;
+  overrides: Record<string, unknown> | null;
+}
+
 export interface ExecutionDetail {
   execution: ExecutionSummary;
   graph_name: string | null;
@@ -72,6 +80,9 @@ export interface ExecutionDetail {
   input: unknown;
   output: unknown;
   nodes: NodeSummary[];
+  replay_of_execution_id: string | null;
+  replay_overrides: Record<string, unknown> | null;
+  replays: ReplayLink[];
 }
 
 export interface TimelineEntry {

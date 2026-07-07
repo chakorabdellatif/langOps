@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 
 from langops_api.domain.entities import (
@@ -45,6 +45,8 @@ class ExecutionDetail:
     execution: Execution
     graph_name: str | None
     nodes: list[NodeView]
+    # v0.2: executions that replayed this one (lineage links).
+    replays: list[Execution] = field(default_factory=list)
 
 
 @dataclass
