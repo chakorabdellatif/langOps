@@ -38,7 +38,12 @@ export function Sidebar() {
           );
         })}
       </nav>
-      <p className="mt-auto text-xs text-neutral-600">Chrome DevTools for LangGraph</p>
+      <div className="mt-auto space-y-2">
+        <div className="rounded border border-neutral-800 px-2 py-1.5 text-xs text-neutral-500">
+          Press <kbd className="rounded bg-neutral-800 px-1">⌘K</kbd> to search
+        </div>
+        <p className="text-xs text-neutral-600">Chrome DevTools for LangGraph</p>
+      </div>
     </aside>
   );
 }

@@ -11,6 +11,9 @@ from langops_api.application.dto import (
     LogPage,
     NodeDetail,
     NodeView,
+    SearchGroup,
+    SearchHit,
+    SearchResults,
     TimelineEntry,
 )
 from langops_api.domain.entities import LlmCall, LogRecord, NodeExecution, ToolCall
@@ -22,6 +25,7 @@ from langops_api.domain.repositories import (
     LogRepository,
     NodeExecutionRepository,
     ProjectRepository,
+    SearchRepository,
     StateSnapshotRepository,
     ToolCallRepository,
 )
@@ -40,6 +44,8 @@ class ListExecutionsService:
         status: str | None = None,
         graph_id: UUID | None = None,
         thread_id: str | None = None,
+        model: str | None = None,
+        has_retries: bool | None = None,
         since: datetime | None = None,
         until: datetime | None = None,
         page: int = 1,
@@ -53,6 +59,8 @@ class ListExecutionsService:
             status=status,
             graph_id=graph_id,
             thread_id=thread_id,
+            model=model,
+            has_retries=has_retries,
             since=since,
             until=until,
             page=page,
@@ -265,3 +273,25 @@ class SearchLogsService:
             offset=offset,
         )
         return LogPage(items=items, total=total, limit=limit, offset=offset)
+
+
+class SearchService:
+    """Global search across executions, graphs, nodes, tools, logs, LLM text."""
+
+    def __init__(self, projects: ProjectRepository, search: SearchRepository) -> None:
+        self._projects = projects
+        self._search = search
+
+    async def search(self, q: str, *, per_group: int = 8) -> SearchResults:
+        project = await self._projects.get_or_create_default()
+        raw = await self._search.search(project.id, q.strip(), per_group=per_group)
+        groups = [
+            SearchGroup(
+                kind=kind,
+                total=total,
+                hits=[SearchHit(kind=kind, **hit) for hit in hits],
+            )
+            for kind, (total, hits) in raw.items()
+            if total > 0
+        ]
+        return SearchResults(query=q, groups=groups)

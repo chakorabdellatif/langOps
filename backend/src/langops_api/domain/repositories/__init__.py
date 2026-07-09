@@ -80,6 +80,8 @@ class ExecutionRepository(Protocol):
         status: str | None = None,
         graph_id: UUID | None = None,
         thread_id: str | None = None,
+        model: str | None = None,
+        has_retries: bool | None = None,
         since: datetime | None = None,
         until: datetime | None = None,
         page: int = 1,
@@ -183,6 +185,14 @@ class LogRepository(Protocol):
         offset: int = 0,
     ) -> tuple[list[LogRecord], int]:
         """Filtered log search (newest first) + total count."""
+        ...
+
+
+class SearchRepository(Protocol):
+    async def search(
+        self, project_id: UUID, q: str, *, per_group: int = 8
+    ) -> dict[str, tuple[int, list[dict[str, Any]]]]:
+        """Full-text search across entities; returns kind → (total, hits)."""
         ...
 
 

@@ -96,6 +96,28 @@ class ThreadDetail:
 
 
 @dataclass
+class SearchHit:
+    kind: str  # execution | graph | node | tool | log | llm
+    label: str
+    detail: str | None
+    execution_id: str | None
+    node_execution_id: str | None
+
+
+@dataclass
+class SearchGroup:
+    kind: str
+    total: int
+    hits: list[SearchHit]
+
+
+@dataclass
+class SearchResults:
+    query: str
+    groups: list[SearchGroup]
+
+
+@dataclass
 class TimelineEntry:
     kind: str  # node | llm | tool
     id: str

@@ -239,8 +239,44 @@ def _map_llm(trace: MappedTrace, span: ParsedSpan) -> None:
         started_at=_ts(span.start_ns),
         error=_error(span),
         stubbed=bool(span.attributes.get(semconv.LLM_STUBBED, False)),
+        text_content=_search_text(
+            _event_payload(span, semconv.EVENT_LLM_MESSAGES),
+            _event_payload(span, semconv.EVENT_LLM_RESPONSE),
+        ),
     )
     trace.llm_calls.append((call, span.parent_span_id))
+
+
+_SEARCH_TEXT_CAP = 8192
+
+
+def _collect_text(node: Any, out: list[str], budget: list[int]) -> None:
+    """Walk a messages/response payload collecting string content, size-capped."""
+    if budget[0] <= 0:
+        return
+    if isinstance(node, str):
+        out.append(node)
+        budget[0] -= len(node)
+    elif isinstance(node, dict):
+        for key in ("content", "text"):
+            if isinstance(node.get(key), str):
+                _collect_text(node[key], out, budget)
+        # Recurse into nested content lists (multimodal / tool messages).
+        for value in node.values():
+            if isinstance(value, (list, dict)) and not isinstance(value, str):
+                _collect_text(value, out, budget)
+    elif isinstance(node, (list, tuple)):
+        for item in node:
+            _collect_text(item, out, budget)
+
+
+def _search_text(messages: Any, response: Any) -> str | None:
+    parts: list[str] = []
+    budget = [_SEARCH_TEXT_CAP]
+    _collect_text(messages, parts, budget)
+    _collect_text(response, parts, budget)
+    text = " ".join(p.strip() for p in parts if p.strip())
+    return text[:_SEARCH_TEXT_CAP] if text else None
 
 
 def _map_tool(trace: MappedTrace, span: ParsedSpan) -> None:
