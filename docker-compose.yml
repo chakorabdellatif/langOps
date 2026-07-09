@@ -38,6 +38,12 @@ services:
       REDIS_URL: redis://redis:6379/0
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       CORS_ORIGINS: http://localhost:3000
+      # Retention on by default (delete executions older than N days; 0 = keep
+      # forever). Set RETENTION_PRUNE_PAYLOADS_DAYS to null payloads while
+      # keeping rollups. Optional API_KEY protects ingest + query when set.
+      RETENTION_DAYS: ${RETENTION_DAYS:-30}
+      RETENTION_PRUNE_PAYLOADS_DAYS: ${RETENTION_PRUNE_PAYLOADS_DAYS:-0}
+      API_KEY: ${LANGOPS_API_KEY:-}
     ports:
       - "8000:8000"
     depends_on:

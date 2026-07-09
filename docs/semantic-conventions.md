@@ -1,6 +1,14 @@
 # LangOps Semantic Conventions
 
-**Version:** 0.1.0 (draft) · **Status:** the SDK ↔ backend contract
+**Version:** 0.2.0 · **Status:** the SDK ↔ backend contract
+
+> **0.2.0 changes (all additive — no breaking bump).** New attributes:
+> `langops.node.category`; topology payload nodes may be objects
+> `{id, category}` (bare strings still accepted); `langops.log` span event
+> for structured logs; `langops.execution.replay_of` +
+> `langops.execution.overrides` for replay lineage. Unknown attributes are
+> ignored by ingestion, so a 0.1 SDK and a 0.2 backend interoperate in both
+> directions.
 
 This document defines the OpenTelemetry attribute namespace emitted by the
 LangOps SDK and consumed by the `langops-api` ingestion mapper. It is the
@@ -69,9 +77,14 @@ Span events:
 
 | Event | Payload | Description |
 |---|---|---|
-| `langops.graph.topology` | JSON `{nodes, edges}` | Captured once via `graph.get_graph()` |
+| `langops.graph.topology` | JSON `{nodes, edges}` | Captured once via `graph.get_graph()`. **v2:** `nodes` entries may be objects `{id, category}` and `edges` entries objects `{source, target, conditional}`; bare strings / 2-tuples are still accepted |
 | `langops.execution.input` | JSON | Initial graph input (truncated per limits) |
 | `langops.execution.output` | JSON | Final graph output |
+
+Replay lineage (v0.2): a replayed run's execution span additionally carries
+`langops.execution.replay_of` (UUID of the original execution) and a
+`langops.execution.overrides` event (JSON of the modifications applied,
+redacted/truncated like any payload).
 
 ## Node spans (`langops.kind = node`)
 
@@ -81,6 +94,7 @@ Span events:
 | `langops.node.name` | string | LangGraph node name |
 | `langops.node.sequence` | int | Execution order within the run |
 | `langops.node.retry_count` | int | Detected via repeated starts of the same node/task id |
+| `langops.node.category` | string? | `llm`\|`tool`\|`utility`\|`router`\|`conditional`\|`checkpoint`\|`subgraph` (v0.2). SDK sends structural categories from the topology; the backend infers `llm`/`tool`/`utility` from child spans when absent |
 
 Span events:
 
@@ -118,6 +132,7 @@ LangOps-specific:
 | Attribute | Type | Description |
 |---|---|---|
 | `langops.execution.id` | string | Correlation |
+| `langops.llm.stubbed` | bool? | Response served from a recording during cached replay — the call cost nothing and is excluded from cost rollups |
 
 Span events:
 
@@ -135,6 +150,19 @@ Span events:
 | `langops.tool.name` | string | |
 
 Span events: `langops.tool.input`, `langops.tool.output` (JSON).
+
+## Structured logs (`langops.log` event, v0.2)
+
+Emitted onto the currently-active LangOps span when log capture is enabled
+(`LangOpsConfig(capture_logs=True)`). Ingestion maps each to a `logs` row, in
+addition to the exception-derived rows below.
+
+| Attribute | Type | Description |
+|---|---|---|
+| `langops.log.level` | string | `debug`\|`info`\|`warning`\|`error`\|`critical` |
+| `langops.log.logger` | string? | Logger name |
+| `langops.log.source` | string | `app`\|`sdk`\|`llm`\|`tool` (exception rows are classified `exception`) |
+| `langops.payload` | JSON | `{message, extra?}` — redacted + size-capped like any payload |
 
 ## Cross-cutting
 

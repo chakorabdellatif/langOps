@@ -27,6 +27,7 @@ from langops_api.domain.entities import (
     StateSnapshot,
     ToolCall,
 )
+from langops_api.domain.services.node_categorizer import STRUCTURAL as _STRUCTURAL
 from langops_api.domain.value_objects import (
     CheckpointRef,
     Cost,
@@ -70,6 +71,9 @@ def _execution_to_entity(row: ExecutionModel) -> Execution:
         tokens=TokenUsage(row.total_input_tokens, row.total_output_tokens),
         total_cost=Decimal(row.total_cost or 0),
         sdk_version=row.sdk_version,
+        error_type=row.error_type,
+        replay_of_execution_id=row.replay_of_execution_id,
+        replay_overrides=row.replay_overrides,
     )
 
 
@@ -87,6 +91,13 @@ def _node_to_entity(row: NodeExecutionModel) -> NodeExecution:
         started_at=row.started_at,
         ended_at=row.ended_at,
         duration_ms=row.duration_ms,
+        category=row.category,
+        tokens=TokenUsage(row.input_tokens, row.output_tokens),
+        cost=Cost(
+            total_cost=Decimal(row.total_cost) if row.total_cost is not None else None,
+            status=CostStatus(row.cost_status),
+        ),
+        error_type=row.error_type,
     )
 
 
@@ -111,6 +122,7 @@ def _llm_to_entity(row: LlmCallModel) -> LlmCall:
         latency_ms=row.latency_ms,
         started_at=row.started_at,
         error=row.error,
+        stubbed=row.stubbed,
     )
 
 
@@ -150,6 +162,8 @@ def _log_to_entity(row: LogModel) -> LogRecord:
         execution_id=row.execution_id,
         node_execution_id=row.node_execution_id,
         level=row.level,
+        source=row.source,
+        logger=row.logger,
         message=row.message,
         stack_trace=row.stack_trace,
         attributes=row.attributes,
@@ -303,6 +317,39 @@ class PostgresExecutionRepository:
         )
         return int(getattr(result, "rowcount", 0) or 0)
 
+    async def prune_payloads_older_than(self, cutoff: datetime) -> int:
+        """Null the large payload columns for executions older than ``cutoff``
+        while keeping the rows (and their rollups), so metrics/cost history
+        survives payload cleanup. Returns the number of executions pruned."""
+        old = sa.select(ExecutionModel.id).where(
+            ExecutionModel.started_at < cutoff,
+            ExecutionModel.input.is_not(None) | ExecutionModel.output.is_not(None),
+        )
+        await self._session.execute(
+            sa.update(LlmCallModel)
+            .where(LlmCallModel.execution_id.in_(old))
+            .values(messages=None, params=None, response=None)
+        )
+        await self._session.execute(
+            sa.update(ToolCallModel)
+            .where(ToolCallModel.execution_id.in_(old))
+            .values(input=None, output=None)
+        )
+        await self._session.execute(
+            sa.update(StateSnapshotModel)
+            .where(StateSnapshotModel.execution_id.in_(old))
+            .values(state=None)
+        )
+        result = await self._session.execute(
+            sa.update(ExecutionModel)
+            .where(
+                ExecutionModel.started_at < cutoff,
+                ExecutionModel.input.is_not(None) | ExecutionModel.output.is_not(None),
+            )
+            .values(input=None, output=None)
+        )
+        return int(getattr(result, "rowcount", 0) or 0)
+
     async def get_by_trace_id(self, trace_id: str) -> Execution | None:
         row = await self._session.scalar(
             sa.select(ExecutionModel).where(ExecutionModel.trace_id == trace_id)
@@ -333,6 +380,7 @@ class PostgresExecutionRepository:
             row.resumed = cp.resumed or row.resumed
             row.status = execution.status.value
             row.error = execution.error if execution.error is not None else row.error
+            row.error_type = execution.error_type or row.error_type
             row.input = execution.input if execution.input is not None else row.input
             row.output = execution.output if execution.output is not None else row.output
             row.started_at = execution.started_at or row.started_at
@@ -341,8 +389,84 @@ class PostgresExecutionRepository:
                 execution.duration_ms if execution.duration_ms is not None else row.duration_ms
             )
             row.sdk_version = execution.sdk_version or row.sdk_version
+            row.replay_of_execution_id = (
+                execution.replay_of_execution_id or row.replay_of_execution_id
+            )
+            row.replay_overrides = (
+                execution.replay_overrides
+                if execution.replay_overrides is not None
+                else row.replay_overrides
+            )
         await self._session.flush()
         return _execution_to_entity(row)
+
+    async def list_replays_of(self, execution_id: UUID) -> list[Execution]:
+        rows = await self._session.scalars(
+            sa.select(ExecutionModel)
+            .where(ExecutionModel.replay_of_execution_id == execution_id)
+            .order_by(ExecutionModel.started_at.desc().nulls_last())
+        )
+        return [_execution_to_entity(r) for r in rows]
+
+    async def list_threads(
+        self, project_id: UUID, *, page: int = 1, page_size: int = 20
+    ) -> tuple[list[dict[str, Any]], int]:
+        tokens = ExecutionModel.total_input_tokens + ExecutionModel.total_output_tokens
+        status_count = lambda value: sa.func.coalesce(  # noqa: E731
+            sa.func.sum(sa.case((ExecutionModel.status == value, 1), else_=0)), 0
+        )
+        grouped = (
+            sa.select(
+                ExecutionModel.thread_id,
+                sa.func.count().label("run_count"),
+                sa.func.min(ExecutionModel.started_at).label("first_at"),
+                sa.func.max(ExecutionModel.started_at).label("last_at"),
+                sa.func.coalesce(sa.func.sum(tokens), 0).label("tokens"),
+                sa.func.coalesce(sa.func.sum(ExecutionModel.total_cost), 0).label("cost"),
+                status_count("succeeded").label("succeeded"),
+                status_count("failed").label("failed"),
+                status_count("running").label("running"),
+            )
+            .where(
+                ExecutionModel.project_id == project_id,
+                ExecutionModel.thread_id.is_not(None),
+            )
+            .group_by(ExecutionModel.thread_id)
+        )
+        total = await self._session.scalar(
+            sa.select(sa.func.count()).select_from(grouped.subquery())
+        )
+        rows = await self._session.execute(
+            grouped.order_by(sa.func.max(ExecutionModel.started_at).desc().nulls_last())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        )
+        items = [
+            {
+                "thread_id": r.thread_id,
+                "run_count": int(r.run_count),
+                "first_at": r.first_at,
+                "last_at": r.last_at,
+                "total_tokens": int(r.tokens),
+                "total_cost": float(r.cost),
+                "succeeded": int(r.succeeded),
+                "failed": int(r.failed),
+                "running": int(r.running),
+            }
+            for r in rows.all()
+        ]
+        return items, int(total or 0)
+
+    async def list_by_thread(self, project_id: UUID, thread_id: str) -> list[Execution]:
+        rows = await self._session.scalars(
+            sa.select(ExecutionModel)
+            .where(
+                ExecutionModel.project_id == project_id,
+                ExecutionModel.thread_id == thread_id,
+            )
+            .order_by(ExecutionModel.started_at.asc().nulls_last())
+        )
+        return [_execution_to_entity(r) for r in rows]
 
     async def update_rollups(
         self, execution_id: UUID, tokens: TokenUsage, total_cost: Decimal
@@ -364,6 +488,9 @@ class PostgresExecutionRepository:
         status: str | None = None,
         graph_id: UUID | None = None,
         thread_id: str | None = None,
+        model: str | None = None,
+        has_retries: bool | None = None,
+        error_type: str | None = None,
         since: datetime | None = None,
         until: datetime | None = None,
         page: int = 1,
@@ -376,6 +503,21 @@ class PostgresExecutionRepository:
             query = query.where(ExecutionModel.graph_id == graph_id)
         if thread_id:
             query = query.where(ExecutionModel.thread_id == thread_id)
+        if error_type:
+            query = query.where(ExecutionModel.error_type == error_type)
+        if model:
+            query = query.where(
+                sa.exists().where(
+                    LlmCallModel.execution_id == ExecutionModel.id,
+                    LlmCallModel.model == model,
+                )
+            )
+        if has_retries is not None:
+            retried = sa.exists().where(
+                NodeExecutionModel.execution_id == ExecutionModel.id,
+                NodeExecutionModel.retry_count > 0,
+            )
+            query = query.where(retried if has_retries else ~retried)
         if since:
             query = query.where(ExecutionModel.started_at >= since)
         if until:
@@ -409,11 +551,81 @@ class PostgresNodeExecutionRepository:
         row.status = node.status.value
         row.retry_count = node.retry_count
         row.error = node.error if node.error is not None else row.error
+        row.error_type = node.error_type or row.error_type
         row.started_at = node.started_at or row.started_at
         row.ended_at = node.ended_at or row.ended_at
         row.duration_ms = node.duration_ms if node.duration_ms is not None else row.duration_ms
+        # Category from the SDK; never blanked by redelivery. Token/cost rollups
+        # are owned by update_rollups (recomputed from child rows), not here.
+        row.category = node.category or row.category
         await self._session.flush()
         return _node_to_entity(row)
+
+    async def recompute_rollups(self, execution_id: UUID) -> None:
+        """Recompute every node's category + token/cost rollup for an execution
+        in a single UPDATE (one round trip, not one statement per node).
+
+        Correlated aggregate subqueries fold each node's child LLM/tool rows;
+        the category CASE mirrors domain ``infer_category`` — a structural SDK
+        category wins, else ``llm``/``tool`` inferred from child spans, else the
+        stored category, else ``utility``. Recomputed (never incremented), so it
+        stays idempotent under OTLP redelivery. Runs on Postgres and SQLite.
+        """
+        node_id = NodeExecutionModel.id
+
+        def _llm_agg(expr: Any) -> Any:
+            return (
+                sa.select(expr)
+                .where(
+                    LlmCallModel.execution_id == execution_id,
+                    LlmCallModel.node_execution_id == node_id,
+                )
+                .correlate(NodeExecutionModel)
+                .scalar_subquery()
+            )
+
+        unknown_case = sa.case((LlmCallModel.cost_status == "unknown", 1), else_=0)
+        input_tokens = sa.func.coalesce(_llm_agg(sa.func.sum(LlmCallModel.input_tokens)), 0)
+        output_tokens = sa.func.coalesce(_llm_agg(sa.func.sum(LlmCallModel.output_tokens)), 0)
+        cost_sum = _llm_agg(sa.func.sum(LlmCallModel.cost))
+        unknown_count = sa.func.coalesce(_llm_agg(sa.func.sum(unknown_case)), 0)
+        llm_count = sa.func.coalesce(_llm_agg(sa.func.count()), 0)
+        tool_count = sa.func.coalesce(
+            sa.select(sa.func.count())
+            .where(
+                ToolCallModel.execution_id == execution_id,
+                ToolCallModel.node_execution_id == node_id,
+            )
+            .correlate(NodeExecutionModel)
+            .scalar_subquery(),
+            0,
+        )
+
+        has_llm = llm_count > 0
+        has_tool = tool_count > 0
+        # A node's cost is trustworthy only if it has priced LLM children and no
+        # unknown ones (ADR-0002 — never present an unpriced call as $0).
+        priced = sa.and_(has_llm, unknown_count == 0)
+
+        category = sa.case(
+            (NodeExecutionModel.category.in_(tuple(_STRUCTURAL)), NodeExecutionModel.category),
+            (has_llm, "llm"),
+            (has_tool, "tool"),
+            (NodeExecutionModel.category.is_not(None), NodeExecutionModel.category),
+            else_="utility",
+        )
+
+        await self._session.execute(
+            sa.update(NodeExecutionModel)
+            .where(NodeExecutionModel.execution_id == execution_id)
+            .values(
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                total_cost=sa.case((priced, cost_sum), else_=None),
+                cost_status=sa.case((priced, "priced"), else_="unknown"),
+                category=category,
+            )
+        )
 
     async def get(self, node_execution_id: UUID) -> NodeExecution | None:
         row = await self._session.get(NodeExecutionModel, node_execution_id)
@@ -461,6 +673,8 @@ class PostgresLlmCallRepository:
         row.latency_ms = call.latency_ms if call.latency_ms is not None else row.latency_ms
         row.started_at = call.started_at or row.started_at
         row.error = call.error if call.error is not None else row.error
+        row.stubbed = call.stubbed
+        row.text_content = call.text_content if call.text_content is not None else row.text_content
         await self._session.flush()
         return _llm_to_entity(row)
 
@@ -532,6 +746,42 @@ class PostgresLlmCallRepository:
             .order_by(day)
         )
         return [{"day": str(d), "total_cost": float(cost)} for d, cost in rows.all()]
+
+    async def cost_by_node(
+        self, project_id: UUID, graph_id: UUID | None = None
+    ) -> list[dict[str, Any]]:
+        """Per-node-name cost rollup (join through node_executions). Unknown-cost
+        calls are counted separately so the dashboard never renders them as $0."""
+        unknown = sa.case((LlmCallModel.cost_status == "unknown", 1), else_=0)
+        query = (
+            sa.select(
+                NodeExecutionModel.node_name,
+                sa.func.coalesce(sa.func.sum(LlmCallModel.input_tokens), 0),
+                sa.func.coalesce(sa.func.sum(LlmCallModel.output_tokens), 0),
+                sa.func.coalesce(sa.func.sum(LlmCallModel.cost), 0),
+                sa.func.count(),
+                sa.func.coalesce(sa.func.sum(unknown), 0),
+            )
+            .join(NodeExecutionModel, NodeExecutionModel.id == LlmCallModel.node_execution_id)
+            .join(ExecutionModel, ExecutionModel.id == LlmCallModel.execution_id)
+            .where(ExecutionModel.project_id == project_id)
+            .group_by(NodeExecutionModel.node_name)
+            .order_by(sa.func.coalesce(sa.func.sum(LlmCallModel.cost), 0).desc())
+        )
+        if graph_id is not None:
+            query = query.where(ExecutionModel.graph_id == graph_id)
+        rows = await self._session.execute(query)
+        return [
+            {
+                "node_name": name,
+                "input_tokens": int(inp),
+                "output_tokens": int(out),
+                "total_cost": float(cost),
+                "calls": int(calls),
+                "unknown_calls": int(unknown_calls),
+            }
+            for name, inp, out, cost, calls, unknown_calls in rows.all()
+        ]
 
 
 class PostgresToolCallRepository:
@@ -634,6 +884,8 @@ class PostgresLogRepository:
             self._session.add(row)
         row.node_execution_id = record.node_execution_id or row.node_execution_id
         row.level = record.level
+        row.source = record.source
+        row.logger = record.logger or row.logger
         row.message = record.message
         row.stack_trace = record.stack_trace or row.stack_trace
         row.attributes = record.attributes if record.attributes is not None else row.attributes
@@ -656,6 +908,267 @@ class PostgresLogRepository:
             .order_by(LogModel.timestamp)
         )
         return [_log_to_entity(r) for r in rows]
+
+    async def search(
+        self,
+        *,
+        execution_id: UUID | None = None,
+        node_execution_id: UUID | None = None,
+        level: str | None = None,
+        source: str | None = None,
+        q: str | None = None,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> tuple[list[LogRecord], int]:
+        query = sa.select(LogModel)
+        if execution_id is not None:
+            query = query.where(LogModel.execution_id == execution_id)
+        if node_execution_id is not None:
+            query = query.where(LogModel.node_execution_id == node_execution_id)
+        if level:
+            query = query.where(LogModel.level == level)
+        if source:
+            query = query.where(LogModel.source == source)
+        if q:
+            query = query.where(LogModel.message.ilike(f"%{q}%"))
+        if since is not None:
+            query = query.where(LogModel.timestamp >= since)
+        if until is not None:
+            query = query.where(LogModel.timestamp <= until)
+        total = await self._session.scalar(sa.select(sa.func.count()).select_from(query.subquery()))
+        rows = await self._session.scalars(
+            query.order_by(LogModel.timestamp.desc().nulls_last()).offset(offset).limit(limit)
+        )
+        return [_log_to_entity(r) for r in rows], int(total or 0)
+
+
+class PostgresErrorRepository:
+    """Failure analytics — group node failures by (error_type, node) and a
+    daily trend, both scoped to a project and an optional time window."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def summary(
+        self, project_id: UUID, since: datetime | None = None
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        base = (
+            sa.select(NodeExecutionModel)
+            .join(ExecutionModel, ExecutionModel.id == NodeExecutionModel.execution_id)
+            .where(
+                ExecutionModel.project_id == project_id,
+                NodeExecutionModel.error_type.is_not(None),
+            )
+        )
+        if since is not None:
+            base = base.where(NodeExecutionModel.started_at >= since)
+        sub = base.subquery()
+
+        grouped = await self._session.execute(
+            sa.select(
+                sub.c.error_type,
+                sub.c.node_name,
+                sa.func.count().label("cnt"),
+                sa.func.min(sub.c.started_at).label("first_seen"),
+                sa.func.max(sub.c.started_at).label("last_seen"),
+                sa.func.min(sub.c.execution_id).label("sample_execution_id"),
+            )
+            .group_by(sub.c.error_type, sub.c.node_name)
+            .order_by(sa.func.count().desc())
+        )
+        groups = [
+            {
+                "error_type": r.error_type,
+                "node_name": r.node_name,
+                "count": int(r.cnt),
+                "first_seen": r.first_seen,
+                "last_seen": r.last_seen,
+                "sample_execution_id": str(r.sample_execution_id),
+            }
+            for r in grouped.all()
+        ]
+
+        day = sa.func.date(sub.c.started_at)
+        trend_rows = await self._session.execute(
+            sa.select(day, sa.func.count())
+            .where(sub.c.started_at.is_not(None))
+            .group_by(day)
+            .order_by(day)
+        )
+        trend = [{"day": str(d), "count": int(c)} for d, c in trend_rows.all()]
+        return groups, trend
+
+
+class PostgresSearchRepository:
+    """Global search — one indexed query per entity kind (executions, graphs,
+    nodes, tools, logs, LLM content). Uses ILIKE; on Postgres the LLM-content
+    scan is served by the pg_trgm GIN index from migration 0006."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def search(
+        self, project_id: UUID, q: str, *, per_group: int = 8
+    ) -> dict[str, tuple[int, list[dict[str, Any]]]]:
+        like = f"%{q}%"
+        return {
+            "execution": await self._executions(project_id, like, per_group),
+            "graph": await self._graphs(project_id, like, per_group),
+            "node": await self._nodes(project_id, like, per_group),
+            "tool": await self._tools(project_id, like, per_group),
+            "log": await self._logs(project_id, like, per_group),
+            "llm": await self._llm(project_id, like, per_group),
+        }
+
+    async def _count_and_rows(
+        self, base: Any, order: Any, limit: int, to_hit: Any
+    ) -> tuple[int, list[dict[str, Any]]]:
+        total = await self._session.scalar(sa.select(sa.func.count()).select_from(base.subquery()))
+        rows = await self._session.execute(base.order_by(order).limit(limit))
+        return int(total or 0), [to_hit(r) for r in rows.all()]
+
+    async def _executions(self, pid: UUID, like: str, n: int) -> tuple[int, list[dict[str, Any]]]:
+        base = sa.select(
+            ExecutionModel.id, ExecutionModel.thread_id, ExecutionModel.trace_id
+        ).where(
+            ExecutionModel.project_id == pid,
+            sa.or_(
+                ExecutionModel.thread_id.ilike(like),
+                ExecutionModel.trace_id.ilike(like),
+            ),
+        )
+        return await self._count_and_rows(
+            base,
+            ExecutionModel.started_at.desc().nulls_last(),
+            n,
+            lambda r: {
+                "label": r.thread_id or r.trace_id,
+                "detail": "execution",
+                "execution_id": str(r.id),
+                "node_execution_id": None,
+            },
+        )
+
+    async def _graphs(self, pid: UUID, like: str, n: int) -> tuple[int, list[dict[str, Any]]]:
+        base = sa.select(GraphModel.id, GraphModel.name).where(
+            GraphModel.project_id == pid, GraphModel.name.ilike(like)
+        )
+        return await self._count_and_rows(
+            base,
+            GraphModel.created_at.desc(),
+            n,
+            lambda r: {
+                "label": r.name,
+                "detail": "graph",
+                "execution_id": None,
+                "node_execution_id": None,
+            },
+        )
+
+    async def _nodes(self, pid: UUID, like: str, n: int) -> tuple[int, list[dict[str, Any]]]:
+        base = (
+            sa.select(
+                NodeExecutionModel.node_name,
+                sa.func.min(NodeExecutionModel.execution_id).label("execution_id"),
+            )
+            .join(ExecutionModel, ExecutionModel.id == NodeExecutionModel.execution_id)
+            .where(ExecutionModel.project_id == pid, NodeExecutionModel.node_name.ilike(like))
+            .group_by(NodeExecutionModel.node_name)
+        )
+        return await self._count_and_rows(
+            base,
+            NodeExecutionModel.node_name,
+            n,
+            lambda r: {
+                "label": r.node_name,
+                "detail": "node",
+                "execution_id": str(r.execution_id),
+                "node_execution_id": None,
+            },
+        )
+
+    async def _tools(self, pid: UUID, like: str, n: int) -> tuple[int, list[dict[str, Any]]]:
+        base = (
+            sa.select(
+                ToolCallModel.tool_name,
+                sa.func.min(ToolCallModel.execution_id).label("execution_id"),
+            )
+            .join(ExecutionModel, ExecutionModel.id == ToolCallModel.execution_id)
+            .where(ExecutionModel.project_id == pid, ToolCallModel.tool_name.ilike(like))
+            .group_by(ToolCallModel.tool_name)
+        )
+        return await self._count_and_rows(
+            base,
+            ToolCallModel.tool_name,
+            n,
+            lambda r: {
+                "label": r.tool_name,
+                "detail": "tool",
+                "execution_id": str(r.execution_id),
+                "node_execution_id": None,
+            },
+        )
+
+    async def _logs(self, pid: UUID, like: str, n: int) -> tuple[int, list[dict[str, Any]]]:
+        base = (
+            sa.select(
+                LogModel.message,
+                LogModel.execution_id,
+                LogModel.node_execution_id,
+                LogModel.level,
+            )
+            .join(ExecutionModel, ExecutionModel.id == LogModel.execution_id)
+            .where(ExecutionModel.project_id == pid, LogModel.message.ilike(like))
+        )
+        return await self._count_and_rows(
+            base,
+            LogModel.timestamp.desc().nulls_last(),
+            n,
+            lambda r: {
+                "label": r.message[:100],
+                "detail": f"log · {r.level}",
+                "execution_id": str(r.execution_id),
+                "node_execution_id": str(r.node_execution_id) if r.node_execution_id else None,
+            },
+        )
+
+    async def _llm(self, pid: UUID, like: str, n: int) -> tuple[int, list[dict[str, Any]]]:
+        base = (
+            sa.select(
+                LlmCallModel.execution_id,
+                LlmCallModel.node_execution_id,
+                LlmCallModel.model,
+                LlmCallModel.text_content,
+            )
+            .join(ExecutionModel, ExecutionModel.id == LlmCallModel.execution_id)
+            .where(
+                ExecutionModel.project_id == pid,
+                LlmCallModel.text_content.is_not(None),
+                LlmCallModel.text_content.ilike(like),
+            )
+        )
+        return await self._count_and_rows(
+            base,
+            LlmCallModel.started_at.desc().nulls_last(),
+            n,
+            lambda r: {
+                "label": (r.model or "llm") + " · " + _snippet(r.text_content, like),
+                "detail": "llm response",
+                "execution_id": str(r.execution_id),
+                "node_execution_id": str(r.node_execution_id) if r.node_execution_id else None,
+            },
+        )
+
+
+def _snippet(text: str | None, like: str) -> str:
+    if not text:
+        return ""
+    needle = like.strip("%").lower()
+    idx = text.lower().find(needle)
+    start = max(0, idx - 30)
+    return ("…" if start > 0 else "") + text[start : start + 80].strip()
 
 
 # Pricing is served from the JSON catalog (infrastructure/pricing/), not the DB

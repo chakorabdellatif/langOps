@@ -20,27 +20,34 @@ from langops_api.application.services.queries import (
     GetExecutionDetailService,
     GetNodeDetailService,
     ListExecutionsService,
+    SearchLogsService,
+    SearchService,
 )
 from langops_api.application.services.reports import (
     CompareExecutionsService,
     GetCostReportService,
+    GetErrorReportService,
     GetMetricsService,
     GetStateEvolutionService,
+    GetThreadDetailService,
     ListGraphsService,
+    ListThreadsService,
 )
-from langops_api.domain.services import CostCalculator, StateDiffer
+from langops_api.domain.services import CostCalculator, ExecutionComparator, StateDiffer
 from langops_api.infrastructure.cache import (
     EVENTS_CHANNEL,
     NullEventPublisher,
     RedisEventPublisher,
 )
 from langops_api.infrastructure.db.repositories import (
+    PostgresErrorRepository,
     PostgresExecutionRepository,
     PostgresGraphRepository,
     PostgresLlmCallRepository,
     PostgresLogRepository,
     PostgresNodeExecutionRepository,
     PostgresProjectRepository,
+    PostgresSearchRepository,
     PostgresStateSnapshotRepository,
     PostgresToolCallRepository,
 )
@@ -59,6 +66,7 @@ class Container:
         self.session_factory = create_session_factory(self.engine)
         self.cost_calculator = CostCalculator()
         self.state_differ = StateDiffer()
+        self.execution_comparator = ExecutionComparator()
         # Pricing catalog is loaded once from JSON at startup (ADR-0002).
         self.pricing = PricingCatalog(settings.pricing_catalog_dir)
         self.publisher: EventPublisher
@@ -76,6 +84,30 @@ class Container:
         """
         async with self.session_factory() as session, session.begin():
             await PostgresProjectRepository(session).get_or_create_default()
+
+    async def run_retention_once(self) -> None:
+        from langops_api.application.services.retention import RetentionService
+
+        async with self.session_factory() as session, session.begin():
+            service = RetentionService(PostgresExecutionRepository(session))
+            if self.settings.retention_days > 0:
+                await service.purge_older_than(self.settings.retention_days)
+            if self.settings.retention_prune_payloads_days > 0:
+                await service.prune_payloads_older_than(self.settings.retention_prune_payloads_days)
+
+    async def retention_loop(self) -> None:
+        """Periodic in-process retention (no cron dependency). Never crashes the
+        loop on error; sleeps ``retention_interval_hours`` between runs."""
+        import structlog
+
+        log = structlog.get_logger("langops_api.retention")
+        interval = max(1, self.settings.retention_interval_hours) * 3600
+        while True:
+            try:
+                await self.run_retention_once()
+            except Exception:  # noqa: BLE001 — retention must never take down the app
+                log.exception("retention_failed")
+            await asyncio.sleep(interval)
 
     async def dispose(self) -> None:
         await self.engine.dispose()
@@ -159,6 +191,7 @@ def get_execution_detail_service(
         graphs=PostgresGraphRepository(session),
         llm_calls=PostgresLlmCallRepository(session),
         tool_calls=PostgresToolCallRepository(session),
+        snapshots=PostgresStateSnapshotRepository(session),
         logs=PostgresLogRepository(session),
     )
 
@@ -173,6 +206,12 @@ def get_node_detail_service(
         snapshots=PostgresStateSnapshotRepository(session),
         logs=PostgresLogRepository(session),
     )
+
+
+def get_search_logs_service(
+    session: AsyncSession = Depends(get_session),
+) -> SearchLogsService:
+    return SearchLogsService(logs=PostgresLogRepository(session))
 
 
 def get_list_graphs_service(
@@ -203,6 +242,42 @@ def get_cost_report_service(
     )
 
 
+def get_error_report_service(
+    session: AsyncSession = Depends(get_session),
+) -> GetErrorReportService:
+    return GetErrorReportService(
+        projects=PostgresProjectRepository(session),
+        errors=PostgresErrorRepository(session),
+    )
+
+
+def get_search_service(
+    session: AsyncSession = Depends(get_session),
+) -> SearchService:
+    return SearchService(
+        projects=PostgresProjectRepository(session),
+        search=PostgresSearchRepository(session),
+    )
+
+
+def get_list_threads_service(
+    session: AsyncSession = Depends(get_session),
+) -> ListThreadsService:
+    return ListThreadsService(
+        projects=PostgresProjectRepository(session),
+        executions=PostgresExecutionRepository(session),
+    )
+
+
+def get_thread_detail_service(
+    session: AsyncSession = Depends(get_session),
+) -> GetThreadDetailService:
+    return GetThreadDetailService(
+        projects=PostgresProjectRepository(session),
+        executions=PostgresExecutionRepository(session),
+    )
+
+
 def get_metrics_service(
     session: AsyncSession = Depends(get_session),
 ) -> GetMetricsService:
@@ -219,6 +294,8 @@ def get_compare_service(
     return CompareExecutionsService(
         detail=get_execution_detail_service(session),
         state_differ=container.state_differ,
+        comparator=container.execution_comparator,
+        snapshots=PostgresStateSnapshotRepository(session),
     )
 
 

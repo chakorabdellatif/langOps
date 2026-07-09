@@ -80,6 +80,107 @@ def test_execution_and_node_spans() -> None:
     payload = _event(nodes[0], semconv.EVENT_STATE_INPUT).attributes[semconv.PAYLOAD]
     assert json.loads(payload) == {"x": 1}
 
+    # Topology payload is v2: node objects {id, ...} and edge objects.
+    topo = json.loads(_event(execution, semconv.EVENT_GRAPH_TOPOLOGY).attributes[semconv.PAYLOAD])
+    assert {n["id"] for n in topo["nodes"]} >= {"plan", "act"}
+    assert all("source" in e and "target" in e and "conditional" in e for e in topo["edges"])
+
+
+def test_log_capture_attaches_to_node_span() -> None:
+    import logging
+
+    provider, exporter = _provider()
+
+    def logging_node(state: State) -> dict:
+        logging.getLogger("myapp").warning("hello from node")
+        return {"x": state["x"] + 1}
+
+    graph = StateGraph(State)
+    graph.add_node("work", logging_node)
+    graph.add_edge(START, "work")
+    graph.add_edge("work", END)
+    instrumented = langops.instrument(
+        graph.compile(), LangOpsConfig(capture_logs=True), tracer_provider=provider
+    )
+
+    instrumented.invoke({"x": 1})
+
+    spans = exporter.get_finished_spans()
+    node = next(
+        s
+        for s in spans
+        if s.attributes.get(semconv.KIND) == "node" and s.attributes[semconv.NODE_NAME] == "work"
+    )
+    log_event = _event(node, semconv.EVENT_LOG)
+    assert log_event.attributes[semconv.LOG_LEVEL] == "warning"
+    assert log_event.attributes[semconv.LOG_SOURCE] == semconv.LogSource.APP
+    assert "hello from node" in log_event.attributes[semconv.PAYLOAD]
+
+
+def test_log_capture_truncation_is_visible() -> None:
+    import logging
+
+    provider, exporter = _provider()
+
+    app_logger = logging.getLogger("app")
+    app_logger.setLevel(logging.INFO)  # let INFO records reach the handler
+
+    def chatty(state: State) -> dict:
+        for i in range(10):
+            app_logger.info("line %d", i)
+        return {"x": state["x"]}
+
+    graph = StateGraph(State)
+    graph.add_node("chatty", chatty)
+    graph.add_edge(START, "chatty")
+    graph.add_edge("chatty", END)
+    instrumented = langops.instrument(
+        graph.compile(),
+        LangOpsConfig(capture_logs=True, max_logs_per_span=3),
+        tracer_provider=provider,
+    )
+
+    instrumented.invoke({"x": 1})
+
+    spans = exporter.get_finished_spans()
+    node = next(
+        s
+        for s in spans
+        if s.attributes.get(semconv.KIND) == "node" and s.attributes[semconv.NODE_NAME] == "chatty"
+    )
+    log_events = [e for e in node.events if e.name == semconv.EVENT_LOG]
+    # 3 captured + exactly 1 truncation marker (never silent) = 4.
+    assert len(log_events) == 4
+    marker = log_events[-1]
+    assert marker.attributes[semconv.LOG_SOURCE] == semconv.LogSource.SDK
+    assert "cap of 3" in marker.attributes[semconv.PAYLOAD]
+
+
+def test_conditional_node_gets_category() -> None:
+    provider, exporter = _provider()
+
+    def route(state: State) -> str:
+        return "act" if state["x"] > 0 else END
+
+    graph = StateGraph(State)
+    graph.add_node("plan", lambda s: {"x": s["x"] + 1})
+    graph.add_node("act", lambda s: {"x": s["x"] * 2})
+    graph.add_edge(START, "plan")
+    graph.add_conditional_edges("plan", route, {"act": "act", END: END})
+    graph.add_edge("act", END)
+    instrumented = langops.instrument(graph.compile(), tracer_provider=provider)
+
+    instrumented.invoke({"x": 1})
+
+    spans = exporter.get_finished_spans()
+    plan = next(
+        s
+        for s in spans
+        if s.attributes.get(semconv.KIND) == "node" and s.attributes[semconv.NODE_NAME] == "plan"
+    )
+    # "plan" is the source of a conditional edge → categorised as conditional.
+    assert plan.attributes[semconv.NODE_CATEGORY] == semconv.NodeCategory.CONDITIONAL
+
 
 def test_llm_and_tool_spans_via_handler() -> None:
     provider, exporter = _provider()

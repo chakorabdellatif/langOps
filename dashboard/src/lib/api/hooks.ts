@@ -6,6 +6,7 @@ import { queryKeys } from "@/lib/query-keys";
 import { apiFetch } from "./client";
 import type {
   CostSummary,
+  ErrorReport,
   ExecutionComparison,
   ExecutionDetail,
   ExecutionList,
@@ -13,9 +14,14 @@ import type {
   GraphTopology,
   LlmCall,
   LogEntry,
+  LogFilters,
+  LogPage,
   MetricsOverview,
   NodeDetail,
+  SearchResults,
   StateEvolution,
+  ThreadDetail,
+  ThreadList,
   TimelineEntry,
   ToolCall,
 } from "./types";
@@ -23,14 +29,17 @@ import type {
 export interface ExecutionFilters {
   status?: string;
   thread_id?: string;
+  model?: string;
+  has_retries?: boolean;
+  error_type?: string;
   page?: number;
   page_size?: number;
 }
 
-function query(filters: ExecutionFilters): string {
+function query(filters: object): string {
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(filters)) {
-    if (value !== undefined && value !== "") params.set(key, String(value));
+    if (value !== undefined && value !== "" && value !== null) params.set(key, String(value));
   }
   const s = params.toString();
   return s ? `?${s}` : "";
@@ -69,6 +78,13 @@ export function useExecutionLogs(id: string) {
   return useQuery({
     queryKey: queryKeys.executions.logs(id),
     queryFn: () => apiFetch<LogEntry[]>(`/api/v1/executions/${id}/logs`),
+  });
+}
+
+export function useLogs(filters: LogFilters = {}) {
+  return useQuery({
+    queryKey: queryKeys.logs.search(filters as Record<string, unknown>),
+    queryFn: () => apiFetch<LogPage>(`/api/v1/logs${query(filters)}`),
   });
 }
 
@@ -113,6 +129,37 @@ export function useCostSummary() {
   return useQuery({
     queryKey: queryKeys.costs.summary({}),
     queryFn: () => apiFetch<CostSummary>("/api/v1/costs/summary"),
+  });
+}
+
+export function useThreads(page = 1) {
+  return useQuery({
+    queryKey: queryKeys.threads.list({ page }),
+    queryFn: () => apiFetch<ThreadList>(`/api/v1/threads?page=${page}`),
+    refetchInterval: 5000,
+  });
+}
+
+export function useThread(threadId: string) {
+  return useQuery({
+    queryKey: queryKeys.threads.detail(threadId),
+    queryFn: () => apiFetch<ThreadDetail>(`/api/v1/threads/${encodeURIComponent(threadId)}`),
+  });
+}
+
+export function useErrorSummary() {
+  return useQuery({
+    queryKey: ["errors", "summary"],
+    queryFn: () => apiFetch<ErrorReport>("/api/v1/errors/summary"),
+    refetchInterval: 10000,
+  });
+}
+
+export function useSearch(q: string) {
+  return useQuery({
+    queryKey: ["search", q],
+    queryFn: () => apiFetch<SearchResults>(`/api/v1/search?q=${encodeURIComponent(q)}`),
+    enabled: q.trim().length > 0,
   });
 }
 

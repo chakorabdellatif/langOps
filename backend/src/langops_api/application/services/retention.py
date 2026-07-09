@@ -15,3 +15,8 @@ class RetentionService:
         """Delete executions started more than ``days`` ago; returns the count."""
         cutoff = (now or datetime.now(tz=UTC)) - timedelta(days=days)
         return await self._executions.delete_older_than(cutoff)
+
+    async def prune_payloads_older_than(self, days: int, *, now: datetime | None = None) -> int:
+        """Null large payloads for executions older than ``days`` (keep rollups)."""
+        cutoff = (now or datetime.now(tz=UTC)) - timedelta(days=days)
+        return await self._executions.prune_payloads_older_than(cutoff)

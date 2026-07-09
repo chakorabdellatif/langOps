@@ -18,6 +18,7 @@ export interface ExecutionSummary {
   total_output_tokens: number;
   total_cost: number;
   sdk_version: string | null;
+  replay_of_execution_id: string | null;
 }
 
 export interface ExecutionList {
@@ -25,6 +26,21 @@ export interface ExecutionList {
   total: number;
   page: number;
   page_size: number;
+}
+
+export type NodeCategory =
+  | "llm"
+  | "tool"
+  | "utility"
+  | "router"
+  | "conditional"
+  | "checkpoint"
+  | "subgraph";
+
+export interface NodeStateChanges {
+  added: string[];
+  modified: string[];
+  removed: string[];
 }
 
 export interface NodeSummary {
@@ -37,6 +53,23 @@ export interface NodeSummary {
   ended_at: string | null;
   duration_ms: number | null;
   error: Record<string, unknown> | null;
+  // v0.2 graph-inspection fields.
+  category: NodeCategory | string;
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+  total_cost: number | null;
+  cost_status: "priced" | "unknown";
+  models: string[];
+  tool_names: string[];
+  state_changes: NodeStateChanges;
+}
+
+export interface ReplayLink {
+  id: string;
+  status: string;
+  started_at: string | null;
+  overrides: Record<string, unknown> | null;
 }
 
 export interface ExecutionDetail {
@@ -47,6 +80,9 @@ export interface ExecutionDetail {
   input: unknown;
   output: unknown;
   nodes: NodeSummary[];
+  replay_of_execution_id: string | null;
+  replay_overrides: Record<string, unknown> | null;
+  replays: ReplayLink[];
 }
 
 export interface TimelineEntry {
@@ -77,6 +113,7 @@ export interface LlmCall {
   latency_ms: number | null;
   started_at: string | null;
   error: Record<string, unknown> | null;
+  stubbed: boolean;
 }
 
 export interface ToolCall {
@@ -110,12 +147,32 @@ export interface StateDiff {
 
 export interface LogEntry {
   id: string;
+  execution_id: string;
   node_execution_id: string | null;
   level: string;
+  source: string;
+  logger: string | null;
   message: string;
   stack_trace: string | null;
   attributes: Record<string, unknown> | null;
   timestamp: string | null;
+}
+
+export interface LogPage {
+  items: LogEntry[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface LogFilters {
+  execution_id?: string;
+  node_execution_id?: string;
+  level?: string;
+  source?: string;
+  q?: string;
+  limit?: number;
+  offset?: number;
 }
 
 export interface NodeDetail {
@@ -149,9 +206,21 @@ export interface GraphSummary {
   created_at: string;
 }
 
+export interface TopologyNode {
+  id: string;
+  category?: NodeCategory | string;
+}
+
+export interface TopologyEdge {
+  source: string;
+  target: string;
+  conditional?: boolean;
+}
+
+// Topology payload accepts both v1 (bare strings / 2-tuples) and v2 (objects).
 export interface GraphTopology {
-  nodes: string[];
-  edges: [string, string][];
+  nodes: (string | TopologyNode)[];
+  edges: ([string, string] | TopologyEdge)[];
 }
 
 export interface CostByModel {
@@ -164,11 +233,85 @@ export interface CostByModel {
   unknown_calls: number;
 }
 
+export interface CostByNode {
+  node_name: string;
+  input_tokens: number;
+  output_tokens: number;
+  total_cost: number;
+  calls: number;
+  unknown_calls: number;
+}
+
 export interface CostSummary {
   total_cost: number;
   total_tokens: number;
   by_model: CostByModel[];
   by_day: { day: string; total_cost: number }[];
+  by_node: CostByNode[];
+}
+
+export interface ErrorGroup {
+  error_type: string;
+  node_name: string;
+  count: number;
+  first_seen: string | null;
+  last_seen: string | null;
+  sample_execution_id: string;
+}
+
+export interface ErrorReport {
+  total: number;
+  groups: ErrorGroup[];
+  trend: { day: string; count: number }[];
+}
+
+export interface SearchHit {
+  kind: string;
+  label: string;
+  detail: string | null;
+  execution_id: string | null;
+  node_execution_id: string | null;
+}
+
+export interface SearchGroup {
+  kind: string;
+  total: number;
+  hits: SearchHit[];
+}
+
+export interface SearchResults {
+  query: string;
+  groups: SearchGroup[];
+}
+
+export interface ThreadSummary {
+  thread_id: string;
+  run_count: number;
+  first_at: string | null;
+  last_at: string | null;
+  total_tokens: number;
+  total_cost: number;
+  succeeded: number;
+  failed: number;
+  running: number;
+}
+
+export interface ThreadList {
+  items: ThreadSummary[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+export interface ThreadRun {
+  execution: ExecutionSummary;
+  cumulative_tokens: number;
+  cumulative_cost: number;
+}
+
+export interface ThreadDetail {
+  thread_id: string;
+  runs: ThreadRun[];
 }
 
 export interface MetricsOverview {
@@ -183,8 +326,58 @@ export interface MetricsOverview {
   latency_p99_ms: number | null;
 }
 
+export interface MetricDelta {
+  a: number | null;
+  b: number | null;
+  delta: number | null;
+  delta_pct: number | null;
+  comparable: boolean;
+}
+
+export interface ExecutionChanges {
+  nodes_added: string[];
+  nodes_removed: string[];
+  order_changed: boolean;
+  retries_added: string[];
+  retries_removed: string[];
+  topology_changed: boolean;
+}
+
+export interface PerformanceChanges {
+  duration: MetricDelta;
+  cost: MetricDelta;
+  total_tokens: MetricDelta;
+  context_size: MetricDelta;
+  node_latency: { node: string; a: number | null; b: number | null; delta_pct: number | null }[];
+}
+
+export interface LlmChanges {
+  model_changed: boolean;
+  models_a: string[];
+  models_b: string[];
+  temperature_changed: boolean;
+  prompt_changed: boolean;
+  prompt_chars: MetricDelta;
+  response_chars: MetricDelta;
+  tool_calls: MetricDelta;
+}
+
+export interface ComparisonInsight {
+  text: string;
+  metric: string;
+  severity: "info" | "good" | "bad";
+}
+
+export interface ComparisonResult {
+  execution_changes: ExecutionChanges;
+  performance: PerformanceChanges;
+  llm_changes: LlmChanges;
+  insights: ComparisonInsight[];
+}
+
 export interface ExecutionComparison {
   a: ExecutionDetail;
   b: ExecutionDetail;
   final_state_diff: StateDiff | null;
+  result: ComparisonResult | null;
 }

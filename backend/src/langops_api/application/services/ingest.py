@@ -26,6 +26,7 @@ from langops_api.domain.repositories import (
     ToolCallRepository,
 )
 from langops_api.domain.services import CostCalculator, StateDiffer
+from langops_api.domain.value_objects import Cost
 from langops_api.infrastructure.otlp import ParsedSpan
 
 logger = structlog.get_logger("langops_api.ingest")
@@ -119,7 +120,10 @@ class IngestTelemetryService:
         for call, parent_span_id in trace.llm_calls:
             call.execution_id = execution_id
             call.node_execution_id = await resolve_node(parent_span_id)
-            if call.provider and call.model:
+            if call.stubbed:
+                # Served from a recording during cached replay — it cost nothing.
+                call.cost = Cost.free()
+            elif call.provider and call.model:
                 pricing = await self._pricing.get_price(call.provider, call.model, call.started_at)
                 call.cost = self._cost_calculator.calculate(call.tokens, pricing)
                 if pricing is None:
@@ -149,7 +153,12 @@ class IngestTelemetryService:
             record.node_execution_id = await resolve_node(node_span_id)
             await self._logs.upsert(record)
 
-        # Rollups are recomputed from child rows, never incremented —
+        # Per-node rollups + category, recomputed from child rows across the
+        # whole execution (not just this batch) so late/out-of-order LLM and
+        # tool spans still land on their node. One batched UPDATE, idempotent.
+        await self._nodes.recompute_rollups(execution_id)
+
+        # Execution rollups are recomputed from child rows, never incremented —
         # idempotent by construction (architecture §3.6).
         tokens, total_cost = await self._llm_calls.sum_usage(execution_id)
         await self._executions.update_rollups(execution_id, tokens, total_cost)

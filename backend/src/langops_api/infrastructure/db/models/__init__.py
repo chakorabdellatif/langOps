@@ -55,6 +55,8 @@ class ExecutionModel(Base):
         sa.Index("ix_executions_project_started", "project_id", "started_at"),
         sa.Index("ix_executions_thread_started", "thread_id", "started_at"),
         sa.Index("ix_executions_graph_started", "graph_id", "started_at"),
+        sa.Index("ix_executions_replay_of", "replay_of_execution_id"),
+        sa.Index("ix_executions_error_type", "error_type"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True)
@@ -76,6 +78,10 @@ class ExecutionModel(Base):
     total_output_tokens: Mapped[int] = mapped_column(sa.Integer, default=0)
     total_cost: Mapped[Decimal] = mapped_column(sa.Numeric(12, 6), default=Decimal("0"))
     sdk_version: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    error_type: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    # v0.2 replay lineage (plain UUID, no FK — see migration 0004).
+    replay_of_execution_id: Mapped[uuid.UUID | None] = mapped_column(sa.Uuid, nullable=True)
+    replay_overrides: Mapped[Any | None] = mapped_column(JSONType, nullable=True)
 
 
 class NodeExecutionModel(Base):
@@ -83,6 +89,7 @@ class NodeExecutionModel(Base):
     __table_args__ = (
         sa.Index("ix_node_executions_execution_sequence", "execution_id", "sequence"),
         sa.Index("ix_node_executions_name_started", "node_name", "started_at"),
+        sa.Index("ix_node_executions_error_type", "error_type"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True)
@@ -99,6 +106,14 @@ class NodeExecutionModel(Base):
     started_at: Mapped[datetime | None] = mapped_column(sa.TIMESTAMP(timezone=True), nullable=True)
     ended_at: Mapped[datetime | None] = mapped_column(sa.TIMESTAMP(timezone=True), nullable=True)
     duration_ms: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
+    # v0.2: category + per-node rollups (recomputed from child llm_calls).
+    category: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    input_tokens: Mapped[int] = mapped_column(sa.Integer, default=0)
+    output_tokens: Mapped[int] = mapped_column(sa.Integer, default=0)
+    # NULL when any child LLM call is unpriced (ADR-0002 — never $0).
+    total_cost: Mapped[Decimal | None] = mapped_column(sa.Numeric(12, 6), nullable=True)
+    cost_status: Mapped[str] = mapped_column(sa.Text, default="unknown")
+    error_type: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
 
 
 class LlmCallModel(Base):
@@ -132,6 +147,10 @@ class LlmCallModel(Base):
     latency_ms: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(sa.TIMESTAMP(timezone=True), nullable=True)
     error: Mapped[Any | None] = mapped_column(JSONType, nullable=True)
+    # v0.1 cached replay: served from a recording (excluded from cost).
+    stubbed: Mapped[bool] = mapped_column(sa.Boolean, default=False)
+    # Flattened prompt+response text for full-text search (pg_trgm on Postgres).
+    text_content: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
 
 
 class ToolCallModel(Base):
@@ -181,6 +200,7 @@ class LogModel(Base):
     __table_args__ = (
         sa.Index("ix_logs_execution_timestamp", "execution_id", "timestamp"),
         sa.Index("ix_logs_level_timestamp", "level", "timestamp"),
+        sa.Index("ix_logs_source", "source"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True)
@@ -191,6 +211,9 @@ class LogModel(Base):
         sa.ForeignKey("node_executions.id", ondelete="CASCADE"), nullable=True
     )
     level: Mapped[str] = mapped_column(sa.Text, default="info")
+    # v0.2: origin channel (app | sdk | llm | tool | exception).
+    source: Mapped[str] = mapped_column(sa.Text, default="app")
+    logger: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
     message: Mapped[str] = mapped_column(sa.Text)
     stack_trace: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
     attributes: Mapped[Any | None] = mapped_column(JSONType, nullable=True)

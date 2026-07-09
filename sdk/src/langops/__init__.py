@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 
 __version__ = "0.1.0"
 
-__all__ = ["LangOpsConfig", "instrument", "__version__"]
+__all__ = ["LangOpsConfig", "instrument", "replay", "__version__"]
 
 _INSTRUMENTED = "__langops_instrumented__"
 
@@ -55,6 +55,11 @@ def instrument(
             tracer_provider = build_tracer_provider(config)
 
         instrument_graph(graph, config, tracer_provider)
+        if config.capture_logs:
+            with contextlib.suppress(Exception):  # log bridge is best-effort
+                from langops.instrumentation.logging_handler import install_log_capture
+
+                install_log_capture(config)
         with contextlib.suppress(Exception):  # guard flag is best-effort
             setattr(graph, _INSTRUMENTED, True)
     except Exception:  # noqa: BLE001 — instrumentation must never break adoption
@@ -65,3 +70,10 @@ def instrument(
         )
 
     return graph
+
+
+def replay(graph: Any, execution_id: str, **kwargs: Any) -> Any:
+    """Re-run a captured execution on ``graph`` (see :mod:`langops._replay`)."""
+    from langops._replay import replay as _replay
+
+    return _replay(graph, execution_id, **kwargs)

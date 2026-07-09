@@ -44,6 +44,20 @@ class ExecutionRepository(Protocol):
 
     async def get_by_trace_id(self, trace_id: str) -> Execution | None: ...
 
+    async def list_replays_of(self, execution_id: UUID) -> list[Execution]:
+        """Executions that replayed ``execution_id`` (newest first)."""
+        ...
+
+    async def list_threads(
+        self, project_id: UUID, *, page: int = 1, page_size: int = 20
+    ) -> tuple[list[dict[str, Any]], int]:
+        """Executions grouped by thread_id (most-recent first) + total thread count."""
+        ...
+
+    async def list_by_thread(self, project_id: UUID, thread_id: str) -> list[Execution]:
+        """All executions of a thread, oldest first (conversation order)."""
+        ...
+
     async def upsert(self, execution: Execution, *, enrich_only: bool = False) -> Execution:
         """Insert by trace_id or merge non-empty fields into the existing row.
 
@@ -66,6 +80,9 @@ class ExecutionRepository(Protocol):
         status: str | None = None,
         graph_id: UUID | None = None,
         thread_id: str | None = None,
+        model: str | None = None,
+        has_retries: bool | None = None,
+        error_type: str | None = None,
         since: datetime | None = None,
         until: datetime | None = None,
         page: int = 1,
@@ -91,9 +108,20 @@ class ExecutionRepository(Protocol):
         """
         ...
 
+    async def prune_payloads_older_than(self, cutoff: datetime) -> int:
+        """Null large payload columns for executions older than ``cutoff``,
+        keeping rollup rows; returns the number of executions pruned."""
+        ...
+
 
 class NodeExecutionRepository(Protocol):
     async def upsert(self, node: NodeExecution) -> NodeExecution: ...
+
+    async def recompute_rollups(self, execution_id: UUID) -> None:
+        """Recompute every node's category + token/cost rollup for an execution
+        from its child rows, in a single batched statement (recomputed, never
+        incremented — idempotent under OTLP redelivery)."""
+        ...
 
     async def get(self, node_execution_id: UUID) -> NodeExecution | None: ...
 
@@ -119,6 +147,12 @@ class LlmCallRepository(Protocol):
         """Per-day total cost (UTC), oldest first."""
         ...
 
+    async def cost_by_node(
+        self, project_id: UUID, graph_id: UUID | None = None
+    ) -> list[dict[str, Any]]:
+        """Per-node-name rollup: tokens, cost, calls, unknown count."""
+        ...
+
 
 class ToolCallRepository(Protocol):
     async def upsert(self, call: ToolCall) -> ToolCall: ...
@@ -142,6 +176,38 @@ class LogRepository(Protocol):
     async def list_by_execution(self, execution_id: UUID) -> list[LogRecord]: ...
 
     async def list_by_node(self, node_execution_id: UUID) -> list[LogRecord]: ...
+
+    async def search(
+        self,
+        *,
+        execution_id: UUID | None = None,
+        node_execution_id: UUID | None = None,
+        level: str | None = None,
+        source: str | None = None,
+        q: str | None = None,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> tuple[list[LogRecord], int]:
+        """Filtered log search (newest first) + total count."""
+        ...
+
+
+class ErrorRepository(Protocol):
+    async def summary(
+        self, project_id: UUID, since: datetime | None = None
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """Return (groups by error_type × node, daily trend)."""
+        ...
+
+
+class SearchRepository(Protocol):
+    async def search(
+        self, project_id: UUID, q: str, *, per_group: int = 8
+    ) -> dict[str, tuple[int, list[dict[str, Any]]]]:
+        """Full-text search across entities; returns kind → (total, hits)."""
+        ...
 
 
 class PricingRepository(Protocol):

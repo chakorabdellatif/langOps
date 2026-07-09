@@ -13,12 +13,19 @@ from uuid import UUID
 from pydantic import BaseModel
 
 from langops_api.application.dto import (
+    ErrorReport,
     ExecutionComparison,
     ExecutionDetail,
     ExecutionPage,
+    LogPage,
     MetricsOverview,
     NodeDetail,
+    NodeView,
+    SearchResults,
     StateEvolution,
+    ThreadDetail,
+    ThreadPage,
+    ThreadSummary,
     TimelineEntry,
 )
 from langops_api.domain.entities import (
@@ -53,6 +60,7 @@ class ExecutionSummaryResponse(BaseModel):
     total_output_tokens: int
     total_cost: float
     sdk_version: str | None
+    replay_of_execution_id: UUID | None
 
     @classmethod
     def from_entity(cls, execution: Execution) -> ExecutionSummaryResponse:
@@ -71,6 +79,7 @@ class ExecutionSummaryResponse(BaseModel):
             total_output_tokens=execution.tokens.output_tokens,
             total_cost=float(execution.total_cost),
             sdk_version=execution.sdk_version,
+            replay_of_execution_id=execution.replay_of_execution_id,
         )
 
 
@@ -90,6 +99,12 @@ class ExecutionListResponse(BaseModel):
         )
 
 
+class NodeStateChanges(BaseModel):
+    added: list[str] = []
+    modified: list[str] = []
+    removed: list[str] = []
+
+
 class NodeSummaryResponse(BaseModel):
     id: UUID
     node_name: str
@@ -100,9 +115,45 @@ class NodeSummaryResponse(BaseModel):
     ended_at: datetime | None
     duration_ms: int | None
     error: dict[str, Any] | None
+    # v0.2 graph-inspection fields (fall back for pre-0.2 rows).
+    category: str
+    input_tokens: int
+    output_tokens: int
+    total_tokens: int
+    total_cost: float | None
+    cost_status: str
+    models: list[str]
+    tool_names: list[str]
+    state_changes: NodeStateChanges
 
     @classmethod
     def from_entity(cls, node: NodeExecution) -> NodeSummaryResponse:
+        """Build from a node alone (node inspector) — no per-execution derivations."""
+        return cls._build(node)
+
+    @classmethod
+    def from_view(cls, view: NodeView) -> NodeSummaryResponse:
+        return cls._build(
+            view.node,
+            models=view.models,
+            tool_names=view.tool_names,
+            state_changes=NodeStateChanges(
+                added=view.state_added,
+                modified=view.state_modified,
+                removed=view.state_removed,
+            ),
+        )
+
+    @classmethod
+    def _build(
+        cls,
+        node: NodeExecution,
+        *,
+        models: list[str] | None = None,
+        tool_names: list[str] | None = None,
+        state_changes: NodeStateChanges | None = None,
+    ) -> NodeSummaryResponse:
+        cost = node.cost
         return cls(
             id=node.id,
             node_name=node.node_name,
@@ -113,7 +164,23 @@ class NodeSummaryResponse(BaseModel):
             ended_at=node.ended_at,
             duration_ms=node.duration_ms,
             error=node.error,
+            category=node.category or "utility",
+            input_tokens=node.tokens.input_tokens,
+            output_tokens=node.tokens.output_tokens,
+            total_tokens=node.tokens.total_tokens,
+            total_cost=float(cost.total_cost) if cost.total_cost is not None else None,
+            cost_status=cost.status.value,
+            models=models or [],
+            tool_names=tool_names or [],
+            state_changes=state_changes or NodeStateChanges(),
         )
+
+
+class ReplayLinkResponse(BaseModel):
+    id: UUID
+    status: str
+    started_at: datetime | None
+    overrides: dict[str, Any] | None
 
 
 class ExecutionDetailResponse(BaseModel):
@@ -124,6 +191,10 @@ class ExecutionDetailResponse(BaseModel):
     input: Any | None
     output: Any | None
     nodes: list[NodeSummaryResponse]
+    # v0.2 replay lineage.
+    replay_of_execution_id: UUID | None
+    replay_overrides: dict[str, Any] | None
+    replays: list[ReplayLinkResponse]
 
     @classmethod
     def from_dto(cls, detail: ExecutionDetail) -> ExecutionDetailResponse:
@@ -135,7 +206,18 @@ class ExecutionDetailResponse(BaseModel):
             error=execution.error,
             input=execution.input,
             output=execution.output,
-            nodes=[NodeSummaryResponse.from_entity(n) for n in detail.nodes],
+            nodes=[NodeSummaryResponse.from_view(n) for n in detail.nodes],
+            replay_of_execution_id=execution.replay_of_execution_id,
+            replay_overrides=execution.replay_overrides,
+            replays=[
+                ReplayLinkResponse(
+                    id=r.id,
+                    status=r.status.value,
+                    started_at=r.started_at,
+                    overrides=r.replay_overrides,
+                )
+                for r in detail.replays
+            ],
         )
 
 
@@ -179,6 +261,7 @@ class LlmCallResponse(BaseModel):
     latency_ms: int | None
     started_at: datetime | None
     error: dict[str, Any] | None
+    stubbed: bool
 
     @classmethod
     def from_entity(cls, call: LlmCall) -> LlmCallResponse:
@@ -201,6 +284,7 @@ class LlmCallResponse(BaseModel):
             latency_ms=call.latency_ms,
             started_at=call.started_at,
             error=call.error,
+            stubbed=call.stubbed,
         )
 
 
@@ -256,8 +340,11 @@ class StateSnapshotResponse(BaseModel):
 
 class LogResponse(BaseModel):
     id: UUID
+    execution_id: UUID
     node_execution_id: UUID | None
     level: str
+    source: str
+    logger: str | None
     message: str
     stack_trace: str | None
     attributes: dict[str, Any] | None
@@ -267,12 +354,31 @@ class LogResponse(BaseModel):
     def from_entity(cls, record: LogRecord) -> LogResponse:
         return cls(
             id=record.id,
+            execution_id=record.execution_id,
             node_execution_id=record.node_execution_id,
             level=record.level,
+            source=record.source,
+            logger=record.logger,
             message=record.message,
             stack_trace=record.stack_trace,
             attributes=record.attributes,
             timestamp=record.timestamp,
+        )
+
+
+class LogPageResponse(BaseModel):
+    items: list[LogResponse]
+    total: int
+    limit: int
+    offset: int
+
+    @classmethod
+    def from_dto(cls, page: LogPage) -> LogPageResponse:
+        return cls(
+            items=[LogResponse.from_entity(r) for r in page.items],
+            total=page.total,
+            limit=page.limit,
+            offset=page.offset,
         )
 
 
@@ -359,6 +465,120 @@ class CostSummaryResponse(BaseModel):
     total_tokens: int
     by_model: list[dict[str, Any]]
     by_day: list[dict[str, Any]]
+    by_node: list[dict[str, Any]]
+
+
+class ErrorGroupResponse(BaseModel):
+    error_type: str
+    node_name: str
+    count: int
+    first_seen: datetime | None
+    last_seen: datetime | None
+    sample_execution_id: str
+
+
+class ErrorReportResponse(BaseModel):
+    total: int
+    groups: list[ErrorGroupResponse]
+    trend: list[dict[str, Any]]
+
+    @classmethod
+    def from_dto(cls, report: ErrorReport) -> ErrorReportResponse:
+        return cls(
+            total=report.total,
+            groups=[ErrorGroupResponse(**g.__dict__) for g in report.groups],
+            trend=report.trend,
+        )
+
+
+class SearchHitResponse(BaseModel):
+    kind: str
+    label: str
+    detail: str | None
+    execution_id: str | None
+    node_execution_id: str | None
+
+
+class SearchGroupResponse(BaseModel):
+    kind: str
+    total: int
+    hits: list[SearchHitResponse]
+
+
+class SearchResponse(BaseModel):
+    query: str
+    groups: list[SearchGroupResponse]
+
+    @classmethod
+    def from_dto(cls, results: SearchResults) -> SearchResponse:
+        return cls(
+            query=results.query,
+            groups=[
+                SearchGroupResponse(
+                    kind=group.kind,
+                    total=group.total,
+                    hits=[SearchHitResponse(**hit.__dict__) for hit in group.hits],
+                )
+                for group in results.groups
+            ],
+        )
+
+
+class ThreadSummaryResponse(BaseModel):
+    thread_id: str
+    run_count: int
+    first_at: datetime | None
+    last_at: datetime | None
+    total_tokens: int
+    total_cost: float
+    succeeded: int
+    failed: int
+    running: int
+
+    @classmethod
+    def from_dto(cls, thread: ThreadSummary) -> ThreadSummaryResponse:
+        return cls(**thread.__dict__)
+
+
+class ThreadListResponse(BaseModel):
+    items: list[ThreadSummaryResponse]
+    total: int
+    page: int
+    page_size: int
+
+    @classmethod
+    def from_dto(cls, page: ThreadPage) -> ThreadListResponse:
+        return cls(
+            items=[ThreadSummaryResponse.from_dto(t) for t in page.items],
+            total=page.total,
+            page=page.page,
+            page_size=page.page_size,
+        )
+
+
+class ThreadRunResponse(BaseModel):
+    execution: ExecutionSummaryResponse
+    cumulative_tokens: int
+    cumulative_cost: float
+
+
+class ThreadDetailResponse(BaseModel):
+    thread_id: str
+    runs: list[ThreadRunResponse]
+
+    @classmethod
+    def from_dto(cls, detail: ThreadDetail) -> ThreadDetailResponse:
+        return cls(
+            thread_id=detail.thread_id,
+            runs=[
+                ThreadRunResponse(
+                    execution=ExecutionSummaryResponse.from_entity(run.execution),
+                    cumulative_tokens=run.cumulative_tokens,
+                    cumulative_cost=run.cumulative_cost,
+                )
+                for run in detail.runs
+            ],
+        )
 
 
 class MetricsOverviewResponse(BaseModel):
@@ -377,15 +597,93 @@ class MetricsOverviewResponse(BaseModel):
         return cls(**metrics.__dict__)
 
 
+class MetricDeltaResponse(BaseModel):
+    a: float | None
+    b: float | None
+    delta: float | None
+    delta_pct: float | None
+    comparable: bool
+
+
+class ExecutionChangesResponse(BaseModel):
+    nodes_added: list[str]
+    nodes_removed: list[str]
+    order_changed: bool
+    retries_added: list[str]
+    retries_removed: list[str]
+    topology_changed: bool
+
+
+class PerformanceChangesResponse(BaseModel):
+    duration: MetricDeltaResponse
+    cost: MetricDeltaResponse
+    total_tokens: MetricDeltaResponse
+    context_size: MetricDeltaResponse
+    node_latency: list[dict[str, Any]]
+
+
+class LlmChangesResponse(BaseModel):
+    model_changed: bool
+    models_a: list[str]
+    models_b: list[str]
+    temperature_changed: bool
+    prompt_changed: bool
+    prompt_first_divergence: int | None
+    prompt_chars: MetricDeltaResponse
+    response_chars: MetricDeltaResponse
+    tool_calls: MetricDeltaResponse
+
+
+class InsightResponse(BaseModel):
+    text: str
+    metric: str
+    severity: str
+
+
+class ComparisonResultResponse(BaseModel):
+    execution_changes: ExecutionChangesResponse
+    performance: PerformanceChangesResponse
+    llm_changes: LlmChangesResponse
+    insights: list[InsightResponse]
+
+
 class ExecutionComparisonResponse(BaseModel):
     a: ExecutionDetailResponse
     b: ExecutionDetailResponse
     final_state_diff: dict[str, Any] | None
+    result: ComparisonResultResponse | None
 
     @classmethod
     def from_dto(cls, comparison: ExecutionComparison) -> ExecutionComparisonResponse:
+        result = comparison.result
         return cls(
             a=ExecutionDetailResponse.from_dto(comparison.a),
             b=ExecutionDetailResponse.from_dto(comparison.b),
             final_state_diff=comparison.final_state_diff,
+            result=None
+            if result is None
+            else ComparisonResultResponse(
+                execution_changes=ExecutionChangesResponse(**result.execution_changes.__dict__),
+                performance=PerformanceChangesResponse(
+                    duration=MetricDeltaResponse(**result.performance.duration.__dict__),
+                    cost=MetricDeltaResponse(**result.performance.cost.__dict__),
+                    total_tokens=MetricDeltaResponse(**result.performance.total_tokens.__dict__),
+                    context_size=MetricDeltaResponse(**result.performance.context_size.__dict__),
+                    node_latency=result.performance.node_latency,
+                ),
+                llm_changes=LlmChangesResponse(
+                    model_changed=result.llm_changes.model_changed,
+                    models_a=result.llm_changes.models_a,
+                    models_b=result.llm_changes.models_b,
+                    temperature_changed=result.llm_changes.temperature_changed,
+                    prompt_changed=result.llm_changes.prompt_changed,
+                    prompt_first_divergence=result.llm_changes.prompt_first_divergence,
+                    prompt_chars=MetricDeltaResponse(**result.llm_changes.prompt_chars.__dict__),
+                    response_chars=MetricDeltaResponse(
+                        **result.llm_changes.response_chars.__dict__
+                    ),
+                    tool_calls=MetricDeltaResponse(**result.llm_changes.tool_calls.__dict__),
+                ),
+                insights=[InsightResponse(**i.__dict__) for i in result.insights],
+            ),
         )

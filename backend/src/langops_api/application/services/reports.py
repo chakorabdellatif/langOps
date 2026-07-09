@@ -2,20 +2,31 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
+from collections.abc import Iterator
 from datetime import datetime
 from typing import Any
 from uuid import UUID
 
 from langops_api.application.dto import (
+    ErrorGroup,
+    ErrorReport,
     ExecutionComparison,
+    ExecutionDetail,
     MetricsOverview,
     StateEvolution,
     StateStep,
+    ThreadDetail,
+    ThreadPage,
+    ThreadRun,
+    ThreadSummary,
 )
 from langops_api.application.services.queries import GetExecutionDetailService
 from langops_api.domain.entities import Graph
-from langops_api.domain.errors import ExecutionNotFound
+from langops_api.domain.errors import ExecutionNotFound, ThreadNotFound
 from langops_api.domain.repositories import (
+    ErrorRepository,
     ExecutionRepository,
     GraphRepository,
     LlmCallRepository,
@@ -23,8 +34,13 @@ from langops_api.domain.repositories import (
     ProjectRepository,
     StateSnapshotRepository,
 )
-from langops_api.domain.services import StateDiffer
-from langops_api.domain.value_objects import ExecutionStatus
+from langops_api.domain.services import ExecutionComparator, StateDiffer
+from langops_api.domain.services.execution_comparator import (
+    ComparisonInput,
+    LlmStat,
+    NodeStat,
+)
+from langops_api.domain.value_objects import CostStatus, ExecutionStatus
 
 
 class ListGraphsService:
@@ -75,10 +91,11 @@ class GetCostReportService:
         self._projects = projects
         self._llm_calls = llm_calls
 
-    async def summary(self) -> dict[str, Any]:
+    async def summary(self, graph_id: UUID | None = None) -> dict[str, Any]:
         project = await self._projects.get_or_create_default()
         by_model = await self._llm_calls.cost_by_model(project.id)
         by_day = await self._llm_calls.cost_by_day(project.id)
+        by_node = await self._llm_calls.cost_by_node(project.id, graph_id)
         total_cost = sum(row["total_cost"] for row in by_model)
         total_tokens = sum(row["input_tokens"] + row["output_tokens"] for row in by_model)
         return {
@@ -86,7 +103,69 @@ class GetCostReportService:
             "total_tokens": total_tokens,
             "by_model": by_model,
             "by_day": by_day,
+            "by_node": by_node,
         }
+
+
+class GetErrorReportService:
+    def __init__(self, projects: ProjectRepository, errors: ErrorRepository) -> None:
+        self._projects = projects
+        self._errors = errors
+
+    async def summary(self, since: datetime | None = None) -> ErrorReport:
+        project = await self._projects.get_or_create_default()
+        groups, trend = await self._errors.summary(project.id, since)
+        return ErrorReport(
+            total=sum(g["count"] for g in groups),
+            groups=[ErrorGroup(**g) for g in groups],
+            trend=trend,
+        )
+
+
+class ListThreadsService:
+    def __init__(self, projects: ProjectRepository, executions: ExecutionRepository) -> None:
+        self._projects = projects
+        self._executions = executions
+
+    async def list(self, *, page: int = 1, page_size: int = 20) -> ThreadPage:
+        page = max(1, page)
+        page_size = min(max(1, page_size), 100)
+        project = await self._projects.get_or_create_default()
+        items, total = await self._executions.list_threads(
+            project.id, page=page, page_size=page_size
+        )
+        return ThreadPage(
+            items=[ThreadSummary(**item) for item in items],
+            total=total,
+            page=page,
+            page_size=page_size,
+        )
+
+
+class GetThreadDetailService:
+    def __init__(self, projects: ProjectRepository, executions: ExecutionRepository) -> None:
+        self._projects = projects
+        self._executions = executions
+
+    async def get(self, thread_id: str) -> ThreadDetail:
+        project = await self._projects.get_or_create_default()
+        executions = await self._executions.list_by_thread(project.id, thread_id)
+        if not executions:
+            raise ThreadNotFound(f"Thread {thread_id} not found")
+        runs: list[ThreadRun] = []
+        cumulative_tokens = 0
+        cumulative_cost = 0.0
+        for execution in executions:
+            cumulative_tokens += execution.tokens.total_tokens
+            cumulative_cost += float(execution.total_cost)
+            runs.append(
+                ThreadRun(
+                    execution=execution,
+                    cumulative_tokens=cumulative_tokens,
+                    cumulative_cost=cumulative_cost,
+                )
+            )
+        return ThreadDetail(thread_id=thread_id, runs=runs)
 
 
 class GetMetricsService:
@@ -118,11 +197,21 @@ class GetMetricsService:
 
 
 class CompareExecutionsService:
-    """Fetch two executions and diff their final states (reuses StateDiffer)."""
+    """Fetch two executions and diff them across state, structure, performance,
+    and LLM usage — deterministically (reuses StateDiffer + ExecutionComparator,
+    never an LLM)."""
 
-    def __init__(self, detail: GetExecutionDetailService, state_differ: StateDiffer) -> None:
+    def __init__(
+        self,
+        detail: GetExecutionDetailService,
+        state_differ: StateDiffer,
+        comparator: ExecutionComparator,
+        snapshots: StateSnapshotRepository,
+    ) -> None:
         self._detail = detail
         self._state_differ = state_differ
+        self._comparator = comparator
+        self._snapshots = snapshots
 
     async def compare(self, a_id: UUID, b_id: UUID) -> ExecutionComparison:
         a = await self._detail.get(a_id)
@@ -130,7 +219,93 @@ class CompareExecutionsService:
         diff = None
         if isinstance(a.execution.output, dict) and isinstance(b.execution.output, dict):
             diff = self._state_differ.diff(a.execution.output, b.execution.output).to_dict()
-        return ExecutionComparison(a=a, b=b, final_state_diff=diff)
+        input_a = await self._build_input(a_id, a)
+        input_b = await self._build_input(b_id, b)
+        result = self._comparator.compare(input_a, input_b)
+        return ExecutionComparison(a=a, b=b, final_state_diff=diff, result=result)
+
+    async def _build_input(self, execution_id: UUID, detail: ExecutionDetail) -> ComparisonInput:
+        execution = detail.execution
+        node_stats = [
+            NodeStat(
+                name=view.node.node_name,
+                sequence=view.node.sequence,
+                retry_count=view.node.retry_count,
+                duration_ms=view.node.duration_ms,
+                category=view.node.category or "utility",
+            )
+            for view in detail.nodes
+        ]
+        calls = await self._detail.llm_calls(execution_id)
+        llm_stats = [
+            LlmStat(
+                model=call.model,
+                temperature=_temperature(call.params),
+                prompt_chars=_json_len(call.messages),
+                response_chars=_json_len(call.response),
+                message_sigs=tuple(_message_signatures(call.messages)),
+            )
+            for call in calls
+        ]
+        # Cost is comparable only when every LLM call is priced; a genuine $0
+        # (no LLM calls, or local models priced 0/0) is known and comparable —
+        # unlike an unpriced call, which must never read as $0 (ADR-0002).
+        cost_known = all(c.cost.status == CostStatus.PRICED for c in calls)
+        tool_calls = await self._detail.tool_calls(execution_id)
+        snapshots = await self._snapshots.list_by_execution(execution_id)
+        context_size = max((s.size_bytes for s in snapshots), default=0)
+        return ComparisonInput(
+            status=execution.status.value,
+            duration_ms=execution.duration_ms,
+            total_tokens=execution.tokens.total_tokens,
+            total_cost=execution.total_cost if cost_known else None,
+            topology_hash=str(execution.graph_id) if execution.graph_id else None,
+            context_size_bytes=context_size,
+            nodes=node_stats,
+            llm_calls=llm_stats,
+            tool_call_count=len(tool_calls),
+        )
+
+
+def _temperature(params: dict[str, Any] | None) -> float | None:
+    if not isinstance(params, dict):
+        return None
+    value = params.get("temperature")
+    return float(value) if isinstance(value, (int, float)) else None
+
+
+def _walk_messages(node: Any) -> Iterator[dict[str, Any]]:
+    """Yield message-like dicts from a possibly-nested messages payload."""
+    if isinstance(node, dict):
+        if "content" in node and ("type" in node or "role" in node):
+            yield node
+    elif isinstance(node, (list, tuple)):
+        for item in node:
+            yield from _walk_messages(item)
+
+
+def _message_signatures(messages: Any) -> list[str]:
+    """Deterministic per-message signatures (``role:content-hash``) for diffing.
+
+    Hashing the content keeps signatures small and comparable while still
+    detecting same-length edits — the char-count heuristic could not.
+    """
+    sigs: list[str] = []
+    for message in _walk_messages(messages):
+        role = str(message.get("type") or message.get("role") or "?")
+        body = json.dumps(message.get("content"), sort_keys=True, default=str)
+        digest = hashlib.sha1(body.encode(), usedforsecurity=False).hexdigest()[:12]
+        sigs.append(f"{role}:{digest}")
+    return sigs
+
+
+def _json_len(value: Any) -> int:
+    if value is None:
+        return 0
+    try:
+        return len(json.dumps(value, default=str))
+    except (TypeError, ValueError):
+        return len(str(value))
 
 
 def _percentile(sorted_values: list[int], q: float) -> int | None:

@@ -15,9 +15,16 @@ export const queryKeys = {
   nodes: {
     detail: (id: string) => ["nodes", "detail", id] as const,
   },
+  logs: {
+    search: (filters: Record<string, unknown>) => ["logs", "search", filters] as const,
+  },
   graphs: {
     all: ["graphs"] as const,
     topology: (id: string) => ["graphs", "topology", id] as const,
+  },
+  threads: {
+    list: (filters: Record<string, unknown>) => ["threads", "list", filters] as const,
+    detail: (id: string) => ["threads", "detail", id] as const,
   },
   costs: {
     summary: (params: Record<string, unknown>) =>

@@ -25,7 +25,12 @@ from langops import semconv
 from langops.config import LangOpsConfig
 from langops.instrumentation.callbacks import LangOpsCallbackHandler
 from langops.instrumentation.checkpointer import InstrumentedCheckpointer
-from langops.instrumentation.runtime import RunContext, add_payload_event, current_run
+from langops.instrumentation.runtime import (
+    RunContext,
+    add_payload_event,
+    current_run,
+    replay_context,
+)
 
 logger = logging.getLogger("langops")
 
@@ -71,7 +76,7 @@ def instrument_graph(graph: Any, sdk_config: LangOpsConfig, provider: TracerProv
 
             graph_name = sdk_config.graph_name or getattr(graph, "name", None) or "graph"
             root.set_attribute(semconv.GRAPH_NAME, graph_name)
-            topology, topology_hash = _topology(graph)
+            topology, topology_hash, node_categories = _topology(graph)
             if topology_hash:
                 root.set_attribute(semconv.GRAPH_TOPOLOGY_HASH, topology_hash)
             if topology is not None:
@@ -86,7 +91,18 @@ def instrument_graph(graph: Any, sdk_config: LangOpsConfig, provider: TracerProv
             if parent_checkpoint:
                 run.parent_checkpoint_id = parent_checkpoint
 
-            handler = LangOpsCallbackHandler(tracer, execution_id, root, sdk_config)
+            # Replay lineage (v0.2): stamp the original execution + overrides.
+            replay = replay_context.get()
+            if replay is not None:
+                root.set_attribute(semconv.EXECUTION_REPLAY_OF, replay.replay_of)
+                if replay.overrides:
+                    add_payload_event(
+                        root, semconv.EVENT_EXECUTION_OVERRIDES, replay.overrides, sdk_config
+                    )
+
+            handler = LangOpsCallbackHandler(
+                tracer, execution_id, root, sdk_config, node_categories=node_categories
+            )
             return run, token, _inject(cfg, handler)
         except Exception:  # noqa: BLE001 — never block the run on telemetry setup
             logger.warning("langops: instrumentation setup failed; running graph unwrapped")
@@ -194,16 +210,43 @@ def _inject(cfg: Any, handler: LangOpsCallbackHandler) -> dict[str, Any]:
     return new_cfg
 
 
-def _topology(graph: Any) -> tuple[dict[str, Any] | None, str | None]:
+def _topology(graph: Any) -> tuple[dict[str, Any] | None, str | None, dict[str, str]]:
+    """Topology payload (v2), its dedupe hash, and per-node structural categories.
+
+    v2 emits node objects ``{id, category?}`` and edge objects
+    ``{source, target, conditional}``. The source of a conditional edge is a
+    routing node, categorised ``conditional`` — the one node category the SDK
+    can derive from the static graph (llm/tool/utility are inferred server-side
+    from runtime spans). Everything here is best-effort: any failure yields no
+    topology and the run is unaffected.
+    """
     try:
         drawable = graph.get_graph()
-        nodes = sorted(str(n) for n in drawable.nodes)
-        edges = sorted((str(e.source), str(e.target)) for e in drawable.edges)
-        topology = {"nodes": nodes, "edges": [list(e) for e in edges]}
+        raw_edges = list(drawable.edges)
+        conditional_sources = {
+            str(e.source) for e in raw_edges if bool(getattr(e, "conditional", False))
+        }
+        categories = {
+            n: semconv.NodeCategory.CONDITIONAL
+            for n in (str(x) for x in drawable.nodes)
+            if n in conditional_sources
+        }
+        node_objs = [
+            {"id": n, "category": categories[n]} if n in categories else {"id": n}
+            for n in sorted(str(x) for x in drawable.nodes)
+        ]
+        edge_objs = [
+            {"source": s, "target": t, "conditional": c}
+            for s, t, c in sorted(
+                (str(e.source), str(e.target), bool(getattr(e, "conditional", False)))
+                for e in raw_edges
+            )
+        ]
+        topology = {"nodes": node_objs, "edges": edge_objs}
         digest = hashlib.sha256(json.dumps(topology, sort_keys=True).encode()).hexdigest()[:16]
-        return topology, digest
+        return topology, digest, categories
     except Exception:  # noqa: BLE001
-        return None, None
+        return None, None, {}
 
 
 def _detect_resumed(graph: Any, cfg: Any) -> tuple[bool, str | None]:

@@ -90,6 +90,84 @@ graph = instrument(graph)
 graph.invoke(..., config={"configurable": {"thread_id": "s1"}})
 ```
 
+### Structured logs (v0.2, opt-in)
+
+```python
+graph = instrument(graph, LangOpsConfig(capture_logs=True))
+```
+
+Bridges stdlib `logging` records into the trace as `langops.log` events on the
+node that emitted them (falling back to the execution root). Off by default —
+when disabled it costs nothing. Records pass the same redaction hook and
+payload cap as every other capture path.
+
+### Replay (v0.2)
+
+Re-run a captured execution on your local instrumented graph — exactly, or with
+modifications:
+
+```bash
+# exact replay
+python -m langops replay <execution-id> --app your_module:graph
+
+# with overrides (experimentation)
+python -m langops replay <execution-id> --app your_module:graph \
+    --model gpt-5 --temperature 0.2 --input new_input.json
+```
+
+or programmatically:
+
+```python
+import langops
+langops.replay(graph, "<execution-id>", model="gpt-5")
+```
+
+#### Cached replay (deterministic, zero-token)
+
+Debug graph logic without paying for inference or hitting external tools:
+recorded LLM/tool outputs are served from the trace.
+
+```bash
+# serve recorded LLM responses (no model call)
+python -m langops replay <id> --app your_module:graph --stub-llm
+
+# also stub specific tools (pass the tool objects)
+python -m langops replay <id> --app your_module:graph --stub-llm \
+    --stub-tool your_module:get_weather --on-miss fail
+```
+
+- **LLM stubbing is generic** — it uses LangChain's global cache to replay
+  recorded generations in order, so it works for any chat model without
+  touching your graph. Stubbed calls are marked (`langops.llm.stubbed`) and
+  **excluded from cost** (a cached response costs nothing); the recorded token
+  counts are still shown.
+- **Tool stubbing is explicit** — pass the tool objects to wrap
+  (`stub_tools=[...]` / `--stub-tool module:attr`); there is no global tool
+  cache, and tools called inside node functions can't be discovered from a
+  compiled graph.
+- `--on-miss fail` aborts if the run diverges from the recording (strict
+  reproducibility); the default `execute` runs the missing call for real.
+- `--stub-llm` cannot be combined with `--model` (replaying the old model's
+  answers contradicts swapping the model); a truncated recorded response
+  cannot be stubbed.
+
+**What replay is — and isn't.** Replay fetches the recorded input/config from
+the API and re-invokes your *local* graph, so it runs in your environment:
+external APIs and tools re-execute for real, and results need not match the
+original. Replay is for **experimentation** (swap a model, edit the input,
+adjust temperature), not deterministic time travel.
+
+- `--model` / `--temperature` are recorded on the new execution and passed via
+  `config["configurable"]` (`langops_replay_model` / `langops_replay_temperature`)
+  — apps that read those keys honour them; LangOps cannot rewrite prompt
+  templates embedded in your code.
+- A fresh thread is used unless `--same-thread`.
+- Replaying an execution whose input was truncated at capture time fails fast
+  (pass `--input` to supply one explicitly).
+- Every replay links back to its original (`replay_of`) so the dashboard shows
+  the lineage and a one-click comparison. Replaying from a checkpoint or an
+  arbitrary node (R3/R4) is future work.
+
 ---
 
 ## Develop & test

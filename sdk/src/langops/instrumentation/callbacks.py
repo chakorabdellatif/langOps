@@ -19,7 +19,7 @@ from opentelemetry.trace import Span, Status, StatusCode
 
 from langops import semconv
 from langops.config import LangOpsConfig
-from langops.instrumentation.runtime import add_payload_event
+from langops.instrumentation.runtime import add_payload_event, current_run, llm_stub_served
 
 logger = logging.getLogger("langops")
 
@@ -48,11 +48,14 @@ class LangOpsCallbackHandler(BaseCallbackHandler):
         execution_id: str,
         root_span: Span,
         config: LangOpsConfig,
+        node_categories: dict[str, str] | None = None,
     ) -> None:
         self._tracer = tracer
         self._execution_id = execution_id
         self._root_span = root_span
         self._config = config
+        # Structural node categories derived from the graph topology (v0.2).
+        self._node_categories = node_categories or {}
         self._spans: dict[UUID, Span] = {}
         self._retries: dict[tuple[str, int], int] = {}
         self._warned: set[str] = set()
@@ -105,18 +108,21 @@ class LangOpsCallbackHandler(BaseCallbackHandler):
             retry_key = (node_name, sequence)
             retry_count = self._retries.get(retry_key, 0)
             self._retries[retry_key] = retry_count + 1
-            span = self._start_span(
-                node_name,
-                run_id,
-                parent_run_id,
-                {
-                    semconv.KIND: semconv.Kind.NODE,
-                    semconv.EXECUTION_ID: self._execution_id,
-                    semconv.NODE_NAME: node_name,
-                    semconv.NODE_SEQUENCE: sequence,
-                    semconv.NODE_RETRY_COUNT: retry_count,
-                },
-            )
+            attributes: dict[str, Any] = {
+                semconv.KIND: semconv.Kind.NODE,
+                semconv.EXECUTION_ID: self._execution_id,
+                semconv.NODE_NAME: node_name,
+                semconv.NODE_SEQUENCE: sequence,
+                semconv.NODE_RETRY_COUNT: retry_count,
+            }
+            category = self._node_categories.get(node_name)
+            if category:
+                attributes[semconv.NODE_CATEGORY] = category
+            span = self._start_span(node_name, run_id, parent_run_id, attributes)
+            # Track the active node span so log records attach to it (v0.2).
+            run = current_run.get()
+            if run is not None:
+                run.node_spans.append(span)
             add_payload_event(
                 span, semconv.EVENT_STATE_INPUT, inputs, self._config, with_message_count=True
             )
@@ -128,6 +134,7 @@ class LangOpsCallbackHandler(BaseCallbackHandler):
             span = self._finish(run_id)
             if span is None:
                 return
+            self._pop_node_span(span)
             add_payload_event(
                 span, semconv.EVENT_STATE_OUTPUT, outputs, self._config, with_message_count=True
             )
@@ -139,9 +146,16 @@ class LangOpsCallbackHandler(BaseCallbackHandler):
         try:
             span = self._finish(run_id, error)
             if span is not None:
+                self._pop_node_span(span)
                 span.end()
         except Exception as inner:  # noqa: BLE001
             self._warn_once("on_chain_error", inner)
+
+    @staticmethod
+    def _pop_node_span(span: Span) -> None:
+        run = current_run.get()
+        if run is not None and span in run.node_spans:
+            run.node_spans.remove(span)
 
     # ── LLM spans ──────────────────────────────────────────────────────
 
@@ -205,6 +219,10 @@ class LangOpsCallbackHandler(BaseCallbackHandler):
             span = self._finish(run_id)
             if span is None:
                 return
+            # Cached replay: mark spans whose response came from the recording.
+            if llm_stub_served.get():
+                span.set_attribute(semconv.LLM_STUBBED, True)
+                llm_stub_served.set(None)
             usage = _extract_usage(response)
             if usage:
                 span.set_attribute(semconv.GEN_AI_USAGE_INPUT_TOKENS, usage[0])

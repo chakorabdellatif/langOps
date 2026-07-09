@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import Any
 
 import structlog
 from fastapi import FastAPI, Request
@@ -20,11 +21,15 @@ from langops_api.domain.errors import (
 from langops_api.infrastructure.logging_config import configure_logging
 from langops_api.infrastructure.settings import Settings
 from langops_api.presentation.api.v1.costs import router as costs_router
+from langops_api.presentation.api.v1.errors import router as errors_router
 from langops_api.presentation.api.v1.executions import router as executions_router
 from langops_api.presentation.api.v1.graphs import router as graphs_router
 from langops_api.presentation.api.v1.health import router as health_router
+from langops_api.presentation.api.v1.logs import router as logs_router
 from langops_api.presentation.api.v1.metrics import router as metrics_router
 from langops_api.presentation.api.v1.nodes import router as nodes_router
+from langops_api.presentation.api.v1.search import router as search_router
+from langops_api.presentation.api.v1.threads import router as threads_router
 from langops_api.presentation.events import router as events_router
 from langops_api.presentation.ingest import router as ingest_router
 
@@ -37,6 +42,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        import asyncio
+
         container = Container(settings)
         if settings.db_create_tables:
             # Test/dev convenience; real deployments migrate via Alembic.
@@ -47,7 +54,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 await conn.run_sync(Base.metadata.create_all)
         await container.ensure_default_project()
         app.state.container = container
+
+        retention_task: asyncio.Task[None] | None = None
+        if settings.retention_days > 0 or settings.retention_prune_payloads_days > 0:
+            retention_task = asyncio.create_task(container.retention_loop())
+
         yield
+
+        if retention_task is not None:
+            retention_task.cancel()
         await container.dispose()
 
     app = FastAPI(title="LangOps API", version="0.1.0", docs_url="/docs", lifespan=lifespan)
@@ -58,6 +73,33 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_methods=["GET", "POST"],
         allow_headers=["*"],
     )
+
+    # Optional single-tenant API-key auth. Off by default; when a key is set,
+    # every ingest/query path requires `Authorization: Bearer <key>` (health
+    # and the OpenAPI docs stay open for probes/discovery).
+    if settings.api_key:
+        import secrets
+
+        _open_prefixes = ("/api/v1/health", "/docs", "/openapi.json", "/redoc")
+        _protected_prefixes = ("/v1/", "/api/v1/")
+
+        @app.middleware("http")
+        async def require_api_key(request: Request, call_next: Any) -> Any:
+            path = request.url.path
+            protected = path.startswith(_protected_prefixes) and not path.startswith(_open_prefixes)
+            if protected:
+                header = request.headers.get("authorization", "")
+                provided = header[7:] if header.lower().startswith("bearer ") else ""
+                if not provided or not secrets.compare_digest(provided, settings.api_key):
+                    return JSONResponse(
+                        status_code=401,
+                        content={
+                            "code": "unauthorized",
+                            "message": "missing or invalid API key",
+                            "detail": None,
+                        },
+                    )
+            return await call_next(request)
 
     # Uniform error contract: {code, message, detail}
     @app.exception_handler(NotFoundError)
@@ -104,6 +146,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(graphs_router, prefix="/api/v1")
     app.include_router(costs_router, prefix="/api/v1")
     app.include_router(metrics_router, prefix="/api/v1")
+    app.include_router(logs_router, prefix="/api/v1")
+    app.include_router(threads_router, prefix="/api/v1")
+    app.include_router(search_router, prefix="/api/v1")
+    app.include_router(errors_router, prefix="/api/v1")
     app.include_router(events_router, prefix="/api/v1")
     app.include_router(ingest_router)  # OTLP-spec path: POST /v1/traces
 

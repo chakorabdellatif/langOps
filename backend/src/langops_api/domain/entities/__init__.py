@@ -53,6 +53,11 @@ class Execution:
     tokens: TokenUsage = field(default_factory=TokenUsage)
     total_cost: Decimal = Decimal(0)
     sdk_version: str | None = None
+    # Exception type extracted from ``error`` for indexed failure analytics.
+    error_type: str | None = None
+    # v0.2 replay lineage: the original execution this run replayed + overrides.
+    replay_of_execution_id: UUID | None = None
+    replay_overrides: dict[str, Any] | None = None
 
 
 @dataclass
@@ -71,6 +76,14 @@ class NodeExecution:
     started_at: datetime | None = None
     ended_at: datetime | None = None
     duration_ms: int | None = None
+    # v0.2: category (llm|tool|utility|router|conditional|checkpoint|subgraph)
+    # and per-node rollups recomputed from child LLM calls during ingestion.
+    # ``category`` is None until inferred; the API renders "utility" as fallback.
+    category: str | None = None
+    tokens: TokenUsage = field(default_factory=TokenUsage)
+    cost: Cost = field(default_factory=Cost.unknown)
+    # Exception type extracted from ``error`` for indexed failure analytics.
+    error_type: str | None = None
 
 
 @dataclass
@@ -89,6 +102,10 @@ class LlmCall:
     latency_ms: int | None = None
     started_at: datetime | None = None
     error: dict[str, Any] | None = None
+    # v0.1 cached replay: response was served from a recording — costs nothing.
+    stubbed: bool = False
+    # Flattened prompt+response text for full-text search (extracted at ingest).
+    text_content: str | None = None
 
 
 @dataclass
@@ -127,6 +144,9 @@ class LogRecord:
     level: str
     message: str
     node_execution_id: UUID | None = None
+    # v0.2: origin channel — app | sdk | llm | tool | exception.
+    source: str = "app"
+    logger: str | None = None
     stack_trace: str | None = None
     attributes: dict[str, Any] | None = None
     timestamp: datetime | None = None

@@ -82,6 +82,10 @@ def _error(span: ParsedSpan) -> dict[str, Any] | None:
     return None
 
 
+def _error_type(error: dict[str, Any] | None) -> str | None:
+    return error.get("type") if error else None
+
+
 def _payload(event: ParsedEvent) -> Any:
     raw = event.attributes.get(semconv.PAYLOAD)
     if isinstance(raw, str):
@@ -134,6 +138,7 @@ def _map_span(trace: MappedTrace, span: ParsedSpan) -> None:
     # Spans without a langops.kind (foreign instrumentation) are ignored.
 
     _map_exception_logs(trace, span)
+    _map_structured_logs(trace, span)
 
 
 def _map_execution(trace: MappedTrace, span: ParsedSpan) -> None:
@@ -141,6 +146,7 @@ def _map_execution(trace: MappedTrace, span: ParsedSpan) -> None:
     execution = trace.execution
     execution.status = _status(span) if span.end_ns else ExecutionStatus.RUNNING
     execution.error = _error(span)
+    execution.error_type = _error_type(execution.error)
     execution.input = _event_payload(span, semconv.EVENT_EXECUTION_INPUT)
     execution.output = _event_payload(span, semconv.EVENT_EXECUTION_OUTPUT)
     execution.started_at = _ts(span.start_ns)
@@ -154,6 +160,15 @@ def _map_execution(trace: MappedTrace, span: ParsedSpan) -> None:
         resumed=bool(span.attributes.get(semconv.CHECKPOINT_RESUMED, False)),
     )
 
+    replay_of = span.attributes.get(semconv.EXECUTION_REPLAY_OF)
+    if replay_of:
+        try:
+            execution.replay_of_execution_id = uuid.UUID(str(replay_of))
+        except ValueError:
+            execution.replay_of_execution_id = None
+        overrides = _event_payload(span, semconv.EVENT_EXECUTION_OVERRIDES)
+        execution.replay_overrides = overrides if isinstance(overrides, dict) else None
+
     graph_name = span.attributes.get(semconv.GRAPH_NAME)
     if graph_name:
         topology = _event_payload(span, semconv.EVENT_GRAPH_TOPOLOGY)
@@ -165,6 +180,7 @@ def _map_execution(trace: MappedTrace, span: ParsedSpan) -> None:
 
 
 def _map_node(trace: MappedTrace, span: ParsedSpan) -> None:
+    category = span.attributes.get(semconv.NODE_CATEGORY)
     node = NodeExecution(
         id=_stable_id("node", span.span_id),
         execution_id=PENDING_EXECUTION_ID,
@@ -175,9 +191,11 @@ def _map_node(trace: MappedTrace, span: ParsedSpan) -> None:
         status=_status(span),
         retry_count=int(span.attributes.get(semconv.NODE_RETRY_COUNT, 0)),
         error=_error(span),
+        error_type=_error_type(_error(span)),
         started_at=_ts(span.start_ns),
         ended_at=_ts(span.end_ns),
         duration_ms=_duration_ms(span),
+        category=str(category) if category else None,
     )
     trace.nodes.append(node)
 
@@ -226,8 +244,45 @@ def _map_llm(trace: MappedTrace, span: ParsedSpan) -> None:
         latency_ms=_duration_ms(span),
         started_at=_ts(span.start_ns),
         error=_error(span),
+        stubbed=bool(span.attributes.get(semconv.LLM_STUBBED, False)),
+        text_content=_search_text(
+            _event_payload(span, semconv.EVENT_LLM_MESSAGES),
+            _event_payload(span, semconv.EVENT_LLM_RESPONSE),
+        ),
     )
     trace.llm_calls.append((call, span.parent_span_id))
+
+
+_SEARCH_TEXT_CAP = 8192
+
+
+def _collect_text(node: Any, out: list[str], budget: list[int]) -> None:
+    """Walk a messages/response payload collecting string content, size-capped."""
+    if budget[0] <= 0:
+        return
+    if isinstance(node, str):
+        out.append(node)
+        budget[0] -= len(node)
+    elif isinstance(node, dict):
+        for key in ("content", "text"):
+            if isinstance(node.get(key), str):
+                _collect_text(node[key], out, budget)
+        # Recurse into nested content lists (multimodal / tool messages).
+        for value in node.values():
+            if isinstance(value, (list, dict)) and not isinstance(value, str):
+                _collect_text(value, out, budget)
+    elif isinstance(node, (list, tuple)):
+        for item in node:
+            _collect_text(item, out, budget)
+
+
+def _search_text(messages: Any, response: Any) -> str | None:
+    parts: list[str] = []
+    budget = [_SEARCH_TEXT_CAP]
+    _collect_text(messages, parts, budget)
+    _collect_text(response, parts, budget)
+    text = " ".join(p.strip() for p in parts if p.strip())
+    return text[:_SEARCH_TEXT_CAP] if text else None
 
 
 def _map_tool(trace: MappedTrace, span: ParsedSpan) -> None:
@@ -255,9 +310,34 @@ def _map_exception_logs(trace: MappedTrace, span: ParsedSpan) -> None:
             id=_stable_id("log", span.span_id, str(index)),
             execution_id=PENDING_EXECUTION_ID,
             level="error",
+            source=semconv.LOG_SOURCE_EXCEPTION,
             message=str(event.attributes.get(semconv.EXCEPTION_MESSAGE, "error")),
             stack_trace=event.attributes.get(semconv.EXCEPTION_STACKTRACE),
             attributes={"exception.type": event.attributes.get(semconv.EXCEPTION_TYPE)},
             timestamp=_ts(event.timestamp_ns) or _ts(span.end_ns),
+        )
+        trace.logs.append((record, span.span_id if is_node else None))
+
+
+def _map_structured_logs(trace: MappedTrace, span: ParsedSpan) -> None:
+    """Map langops.log events (v0.2) → LogRecord, linked to the node span."""
+    is_node = span.attributes.get(semconv.KIND) == semconv.KIND_NODE
+    for index, event in enumerate(span.events):
+        if event.name != semconv.EVENT_LOG:
+            continue
+        payload = _payload(event)
+        message = ""
+        if isinstance(payload, dict):
+            message = str(payload.get("message", ""))
+        elif payload is not None:
+            message = str(payload)
+        record = LogRecord(
+            id=_stable_id("applog", span.span_id, str(index)),
+            execution_id=PENDING_EXECUTION_ID,
+            level=str(event.attributes.get(semconv.LOG_LEVEL, "info")),
+            source=str(event.attributes.get(semconv.LOG_SOURCE, semconv.LOG_SOURCE_APP)),
+            logger=event.attributes.get(semconv.LOG_LOGGER),
+            message=message,
+            timestamp=_ts(event.timestamp_ns) or _ts(span.start_ns),
         )
         trace.logs.append((record, span.span_id if is_node else None))

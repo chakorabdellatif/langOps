@@ -34,9 +34,11 @@ from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
+from dotenv import load_dotenv
 
 import langops
 
+load_dotenv()
 MODEL = "gpt-4o-mini"
 cache = redis.Redis.from_url(os.getenv("REDIS_URL", "redis://localhost:6379/0"))
 
