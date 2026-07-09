@@ -1,14 +1,18 @@
 "use client";
 
+import Link from "next/link";
+
 import { Card, Cost, Duration, EmptyState, ExecutionLink, StatusBadge, Stat, Tokens } from "@/components/data";
-import { useCostSummary, useExecutions, useMetrics } from "@/lib/api/hooks";
+import { useCostSummary, useErrorSummary, useExecutions, useMetrics } from "@/lib/api/hooks";
 
 export default function OverviewPage() {
   const metrics = useMetrics();
   const costs = useCostSummary();
+  const errors = useErrorSummary();
   const executions = useExecutions({ page_size: 8 });
   const m = metrics.data;
   const successRate = m && m.total_executions ? (m.succeeded / m.total_executions) * 100 : null;
+  const topErrors = (errors.data?.groups ?? []).slice(0, 5);
 
   return (
     <div className="space-y-6">
@@ -32,6 +36,29 @@ export default function OverviewPage() {
           <Duration ms={m?.latency_p95_ms ?? null} />
         </Stat>
       </div>
+
+      {topErrors.length > 0 && (
+        <Card title="Top failures">
+          <ul className="space-y-1 text-sm">
+            {topErrors.map((g, i) => (
+              <li key={i} className="flex items-center gap-3">
+                <span className="font-medium text-rose-300">{g.error_type}</span>
+                <span className="text-neutral-500">in {g.node_name}</span>
+                <span className="ml-auto tabular-nums text-neutral-400">×{g.count}</span>
+                <Link
+                  href={`/executions?error_type=${encodeURIComponent(g.error_type)}`}
+                  className="text-xs text-sky-400 hover:underline"
+                >
+                  view
+                </Link>
+              </li>
+            ))}
+          </ul>
+          <Link href="/errors" className="mt-2 inline-block text-xs text-sky-400 hover:underline">
+            All errors →
+          </Link>
+        </Card>
+      )}
 
       <Card title="Recent executions">
         {executions.isLoading && <p className="text-sm text-neutral-500">Loading…</p>}

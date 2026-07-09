@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
+import { useSearchParams } from "next/navigation";
 
 import { Card, Cost, Duration, EmptyState, ExecutionLink, StatusBadge, Tokens } from "@/components/data";
 import { useExecutions } from "@/lib/api/hooks";
@@ -8,14 +9,25 @@ import { useExecutions } from "@/lib/api/hooks";
 const STATUSES = ["", "running", "succeeded", "failed", "interrupted"];
 
 export default function ExecutionsPage() {
+  return (
+    <Suspense fallback={<p className="text-sm text-neutral-500">Loading…</p>}>
+      <ExecutionsView />
+    </Suspense>
+  );
+}
+
+function ExecutionsView() {
+  const params = useSearchParams();
   const [status, setStatus] = useState("");
   const [model, setModel] = useState("");
   const [hasRetries, setHasRetries] = useState(false);
+  const [errorType, setErrorType] = useState(params.get("error_type") ?? "");
   const [page, setPage] = useState(1);
   const { data, isLoading } = useExecutions({
     status,
     model: model || undefined,
     has_retries: hasRetries || undefined,
+    error_type: errorType || undefined,
     page,
     page_size: 20,
   });
@@ -60,6 +72,14 @@ export default function ExecutionsPage() {
           />
           has retries
         </label>
+        {errorType && (
+          <button
+            onClick={() => setErrorType("")}
+            className="rounded bg-rose-500/15 px-2 py-1 text-xs text-rose-300 ring-1 ring-rose-500/30"
+          >
+            error: {errorType} ✕
+          </button>
+        )}
       </div>
 
       <Card>

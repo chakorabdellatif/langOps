@@ -53,6 +53,8 @@ class Execution:
     tokens: TokenUsage = field(default_factory=TokenUsage)
     total_cost: Decimal = Decimal(0)
     sdk_version: str | None = None
+    # Exception type extracted from ``error`` for indexed failure analytics.
+    error_type: str | None = None
     # v0.2 replay lineage: the original execution this run replayed + overrides.
     replay_of_execution_id: UUID | None = None
     replay_overrides: dict[str, Any] | None = None
@@ -80,6 +82,8 @@ class NodeExecution:
     category: str | None = None
     tokens: TokenUsage = field(default_factory=TokenUsage)
     cost: Cost = field(default_factory=Cost.unknown)
+    # Exception type extracted from ``error`` for indexed failure analytics.
+    error_type: str | None = None
 
 
 @dataclass

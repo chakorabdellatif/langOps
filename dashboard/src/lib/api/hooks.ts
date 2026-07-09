@@ -6,6 +6,7 @@ import { queryKeys } from "@/lib/query-keys";
 import { apiFetch } from "./client";
 import type {
   CostSummary,
+  ErrorReport,
   ExecutionComparison,
   ExecutionDetail,
   ExecutionList,
@@ -30,6 +31,7 @@ export interface ExecutionFilters {
   thread_id?: string;
   model?: string;
   has_retries?: boolean;
+  error_type?: string;
   page?: number;
   page_size?: number;
 }
@@ -142,6 +144,14 @@ export function useThread(threadId: string) {
   return useQuery({
     queryKey: queryKeys.threads.detail(threadId),
     queryFn: () => apiFetch<ThreadDetail>(`/api/v1/threads/${encodeURIComponent(threadId)}`),
+  });
+}
+
+export function useErrorSummary() {
+  return useQuery({
+    queryKey: ["errors", "summary"],
+    queryFn: () => apiFetch<ErrorReport>("/api/v1/errors/summary"),
+    refetchInterval: 10000,
   });
 }
 

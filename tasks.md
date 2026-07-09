@@ -552,21 +552,23 @@ serves it via the pg_trgm GIN index)
 What on-call debugging actually needs: *"TimeoutError in weather ×12 this
 week"* — a GROUP BY away from data already stored.
 
-- [ ] Migration: extract `error_type` (from the error JSONB's `type`) into
-      an indexed column on `node_executions` and `executions` at ingest;
-      backfill in the migration
-- [ ] `GET /api/v1/errors/summary?since=`: groups by `error_type` ×
-      `node_name` — count, first/last seen, sample execution ids, per-day
-      trend buckets
-- [ ] Dashboard Errors screen: grouped table + trend sparkline per group;
-      click-through → executions list pre-filtered to those failures;
-      Overview page gains a "top failures (7d)" card
-- [ ] Executions list facet: `error_type`
-- [ ] Tests: grouping with injected TimeoutError/ValueError fixtures across
-      nodes, time-window filtering, click-through filter contract
+- [x] Migration `0007_error_type`: indexed `error_type` on `executions` and
+      `node_executions`, extracted from the error JSON at ingest; migration
+      backfills existing rows (Postgres `error->>'type'`)
+- [x] `GET /api/v1/errors/summary?since=`: `PostgresErrorRepository` groups by
+      `error_type` × `node_name` (count, first/last seen, sample execution) +
+      a daily trend
+- [x] Dashboard Errors screen: grouped table + inline-SVG trend sparkline,
+      sample links + "view all →" click-through to filtered executions;
+      Overview "Top failures" card
+- [x] Executions facet: `error_type` (URL param honoured, removable chip)
+- [x] Tests: grouping (TimeoutError×3 in weather, ValueError in planner),
+      daily trend total, error_type facet
 
-**Accept when:** three injected TimeoutErrors in one node group as a single
-row with count 3 and working drill-down; the overview card shows it.
+**Accept when:** injected TimeoutErrors in one node group as a single row with
+the right count and working drill-down; the overview card shows it. ✅
+(verified in-browser: TimeoutError/weather ×5, ValueError/planner ×3,
+KeyError/summary ×2 with trend + sample links + "view all")
 
 ## Phase 19 — Production hardening & the 0.1.0 release (P6)
 

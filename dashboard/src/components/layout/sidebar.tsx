@@ -9,6 +9,7 @@ const LINKS = [
   { href: "/threads", label: "Threads" },
   { href: "/compare", label: "Compare" },
   { href: "/costs", label: "Costs" },
+  { href: "/errors", label: "Errors" },
   { href: "/metrics", label: "Metrics" },
 ];
 

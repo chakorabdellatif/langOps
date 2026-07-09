@@ -82,6 +82,7 @@ class ExecutionRepository(Protocol):
         thread_id: str | None = None,
         model: str | None = None,
         has_retries: bool | None = None,
+        error_type: str | None = None,
         since: datetime | None = None,
         until: datetime | None = None,
         page: int = 1,
@@ -185,6 +186,14 @@ class LogRepository(Protocol):
         offset: int = 0,
     ) -> tuple[list[LogRecord], int]:
         """Filtered log search (newest first) + total count."""
+        ...
+
+
+class ErrorRepository(Protocol):
+    async def summary(
+        self, project_id: UUID, since: datetime | None = None
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """Return (groups by error_type × node, daily trend)."""
         ...
 
 

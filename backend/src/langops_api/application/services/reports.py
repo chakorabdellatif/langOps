@@ -10,6 +10,8 @@ from typing import Any
 from uuid import UUID
 
 from langops_api.application.dto import (
+    ErrorGroup,
+    ErrorReport,
     ExecutionComparison,
     ExecutionDetail,
     MetricsOverview,
@@ -24,6 +26,7 @@ from langops_api.application.services.queries import GetExecutionDetailService
 from langops_api.domain.entities import Graph
 from langops_api.domain.errors import ExecutionNotFound, ThreadNotFound
 from langops_api.domain.repositories import (
+    ErrorRepository,
     ExecutionRepository,
     GraphRepository,
     LlmCallRepository,
@@ -102,6 +105,21 @@ class GetCostReportService:
             "by_day": by_day,
             "by_node": by_node,
         }
+
+
+class GetErrorReportService:
+    def __init__(self, projects: ProjectRepository, errors: ErrorRepository) -> None:
+        self._projects = projects
+        self._errors = errors
+
+    async def summary(self, since: datetime | None = None) -> ErrorReport:
+        project = await self._projects.get_or_create_default()
+        groups, trend = await self._errors.summary(project.id, since)
+        return ErrorReport(
+            total=sum(g["count"] for g in groups),
+            groups=[ErrorGroup(**g) for g in groups],
+            trend=trend,
+        )
 
 
 class ListThreadsService:
