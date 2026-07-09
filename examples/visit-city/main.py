@@ -34,9 +34,11 @@ from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
+from dotenv import load_dotenv
 
 import langops
 
+load_dotenv()
 MODEL = "gpt-4o-mini"
 cache = redis.Redis.from_url(os.getenv("REDIS_URL", "redis://localhost:6379/0"))
 
@@ -47,7 +49,7 @@ def llm() -> ChatOpenAI:
     """Lazily construct the model (so importing this module needs no API key)."""
     global _llm
     if _llm is None:
-        _llm = ChatOpenAI(model=MODEL, temperature=0.3, api_key="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")
+        _llm = ChatOpenAI(model=MODEL, temperature=0.3, api_key=os.getenv("OPENAI_API_KEY"))
     return _llm
 
 
