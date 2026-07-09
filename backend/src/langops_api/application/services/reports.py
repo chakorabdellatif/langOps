@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+from collections.abc import Iterator
 from datetime import datetime
 from typing import Any
 from uuid import UUID
@@ -31,7 +33,7 @@ from langops_api.domain.services.execution_comparator import (
     LlmStat,
     NodeStat,
 )
-from langops_api.domain.value_objects import ExecutionStatus
+from langops_api.domain.value_objects import CostStatus, ExecutionStatus
 
 
 class ListGraphsService:
@@ -164,15 +166,21 @@ class CompareExecutionsService:
             )
             for view in detail.nodes
         ]
+        calls = await self._detail.llm_calls(execution_id)
         llm_stats = [
             LlmStat(
                 model=call.model,
                 temperature=_temperature(call.params),
                 prompt_chars=_json_len(call.messages),
                 response_chars=_json_len(call.response),
+                message_sigs=tuple(_message_signatures(call.messages)),
             )
-            for call in await self._detail.llm_calls(execution_id)
+            for call in calls
         ]
+        # Cost is comparable only when every LLM call is priced; a genuine $0
+        # (no LLM calls, or local models priced 0/0) is known and comparable —
+        # unlike an unpriced call, which must never read as $0 (ADR-0002).
+        cost_known = all(c.cost.status == CostStatus.PRICED for c in calls)
         tool_calls = await self._detail.tool_calls(execution_id)
         snapshots = await self._snapshots.list_by_execution(execution_id)
         context_size = max((s.size_bytes for s in snapshots), default=0)
@@ -180,7 +188,7 @@ class CompareExecutionsService:
             status=execution.status.value,
             duration_ms=execution.duration_ms,
             total_tokens=execution.tokens.total_tokens,
-            total_cost=execution.total_cost if execution.total_cost else None,
+            total_cost=execution.total_cost if cost_known else None,
             topology_hash=str(execution.graph_id) if execution.graph_id else None,
             context_size_bytes=context_size,
             nodes=node_stats,
@@ -194,6 +202,31 @@ def _temperature(params: dict[str, Any] | None) -> float | None:
         return None
     value = params.get("temperature")
     return float(value) if isinstance(value, (int, float)) else None
+
+
+def _walk_messages(node: Any) -> Iterator[dict[str, Any]]:
+    """Yield message-like dicts from a possibly-nested messages payload."""
+    if isinstance(node, dict):
+        if "content" in node and ("type" in node or "role" in node):
+            yield node
+    elif isinstance(node, (list, tuple)):
+        for item in node:
+            yield from _walk_messages(item)
+
+
+def _message_signatures(messages: Any) -> list[str]:
+    """Deterministic per-message signatures (``role:content-hash``) for diffing.
+
+    Hashing the content keeps signatures small and comparable while still
+    detecting same-length edits — the char-count heuristic could not.
+    """
+    sigs: list[str] = []
+    for message in _walk_messages(messages):
+        role = str(message.get("type") or message.get("role") or "?")
+        body = json.dumps(message.get("content"), sort_keys=True, default=str)
+        digest = hashlib.sha1(body.encode(), usedforsecurity=False).hexdigest()[:12]
+        sigs.append(f"{role}:{digest}")
+    return sigs
 
 
 def _json_len(value: Any) -> int:

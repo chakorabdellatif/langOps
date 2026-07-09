@@ -117,6 +117,45 @@ def test_log_capture_attaches_to_node_span() -> None:
     assert "hello from node" in log_event.attributes[semconv.PAYLOAD]
 
 
+def test_log_capture_truncation_is_visible() -> None:
+    import logging
+
+    provider, exporter = _provider()
+
+    app_logger = logging.getLogger("app")
+    app_logger.setLevel(logging.INFO)  # let INFO records reach the handler
+
+    def chatty(state: State) -> dict:
+        for i in range(10):
+            app_logger.info("line %d", i)
+        return {"x": state["x"]}
+
+    graph = StateGraph(State)
+    graph.add_node("chatty", chatty)
+    graph.add_edge(START, "chatty")
+    graph.add_edge("chatty", END)
+    instrumented = langops.instrument(
+        graph.compile(),
+        LangOpsConfig(capture_logs=True, max_logs_per_span=3),
+        tracer_provider=provider,
+    )
+
+    instrumented.invoke({"x": 1})
+
+    spans = exporter.get_finished_spans()
+    node = next(
+        s
+        for s in spans
+        if s.attributes.get(semconv.KIND) == "node" and s.attributes[semconv.NODE_NAME] == "chatty"
+    )
+    log_events = [e for e in node.events if e.name == semconv.EVENT_LOG]
+    # 3 captured + exactly 1 truncation marker (never silent) = 4.
+    assert len(log_events) == 4
+    marker = log_events[-1]
+    assert marker.attributes[semconv.LOG_SOURCE] == semconv.LogSource.SDK
+    assert "cap of 3" in marker.attributes[semconv.PAYLOAD]
+
+
 def test_conditional_node_gets_category() -> None:
     provider, exporter = _provider()
 

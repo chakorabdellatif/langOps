@@ -27,6 +27,7 @@ from langops_api.domain.entities import (
     StateSnapshot,
     ToolCall,
 )
+from langops_api.domain.services.node_categorizer import STRUCTURAL as _STRUCTURAL
 from langops_api.domain.value_objects import (
     CheckpointRef,
     Cost,
@@ -444,27 +445,70 @@ class PostgresNodeExecutionRepository:
         await self._session.flush()
         return _node_to_entity(row)
 
-    async def update_rollups(
-        self,
-        node_execution_id: UUID,
-        *,
-        category: str | None,
-        tokens: TokenUsage,
-        total_cost: Decimal | None,
-        cost_status: str,
-    ) -> None:
-        values: dict[str, Any] = {
-            "input_tokens": tokens.input_tokens,
-            "output_tokens": tokens.output_tokens,
-            "total_cost": total_cost,
-            "cost_status": cost_status,
-        }
-        if category is not None:
-            values["category"] = category
+    async def recompute_rollups(self, execution_id: UUID) -> None:
+        """Recompute every node's category + token/cost rollup for an execution
+        in a single UPDATE (one round trip, not one statement per node).
+
+        Correlated aggregate subqueries fold each node's child LLM/tool rows;
+        the category CASE mirrors domain ``infer_category`` — a structural SDK
+        category wins, else ``llm``/``tool`` inferred from child spans, else the
+        stored category, else ``utility``. Recomputed (never incremented), so it
+        stays idempotent under OTLP redelivery. Runs on Postgres and SQLite.
+        """
+        node_id = NodeExecutionModel.id
+
+        def _llm_agg(expr: Any) -> Any:
+            return (
+                sa.select(expr)
+                .where(
+                    LlmCallModel.execution_id == execution_id,
+                    LlmCallModel.node_execution_id == node_id,
+                )
+                .correlate(NodeExecutionModel)
+                .scalar_subquery()
+            )
+
+        unknown_case = sa.case((LlmCallModel.cost_status == "unknown", 1), else_=0)
+        input_tokens = sa.func.coalesce(_llm_agg(sa.func.sum(LlmCallModel.input_tokens)), 0)
+        output_tokens = sa.func.coalesce(_llm_agg(sa.func.sum(LlmCallModel.output_tokens)), 0)
+        cost_sum = _llm_agg(sa.func.sum(LlmCallModel.cost))
+        unknown_count = sa.func.coalesce(_llm_agg(sa.func.sum(unknown_case)), 0)
+        llm_count = sa.func.coalesce(_llm_agg(sa.func.count()), 0)
+        tool_count = sa.func.coalesce(
+            sa.select(sa.func.count())
+            .where(
+                ToolCallModel.execution_id == execution_id,
+                ToolCallModel.node_execution_id == node_id,
+            )
+            .correlate(NodeExecutionModel)
+            .scalar_subquery(),
+            0,
+        )
+
+        has_llm = llm_count > 0
+        has_tool = tool_count > 0
+        # A node's cost is trustworthy only if it has priced LLM children and no
+        # unknown ones (ADR-0002 — never present an unpriced call as $0).
+        priced = sa.and_(has_llm, unknown_count == 0)
+
+        category = sa.case(
+            (NodeExecutionModel.category.in_(tuple(_STRUCTURAL)), NodeExecutionModel.category),
+            (has_llm, "llm"),
+            (has_tool, "tool"),
+            (NodeExecutionModel.category.is_not(None), NodeExecutionModel.category),
+            else_="utility",
+        )
+
         await self._session.execute(
             sa.update(NodeExecutionModel)
-            .where(NodeExecutionModel.id == node_execution_id)
-            .values(**values)
+            .where(NodeExecutionModel.execution_id == execution_id)
+            .values(
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                total_cost=sa.case((priced, cost_sum), else_=None),
+                cost_status=sa.case((priced, "priced"), else_="unknown"),
+                category=category,
+            )
         )
 
     async def get(self, node_execution_id: UUID) -> NodeExecution | None:
@@ -531,38 +575,6 @@ class PostgresLlmCallRepository:
             .order_by(LlmCallModel.started_at)
         )
         return [_llm_to_entity(r) for r in rows]
-
-    async def aggregate_by_node(
-        self, execution_id: UUID
-    ) -> dict[UUID, tuple[TokenUsage, Decimal | None, str]]:
-        """Per-node token/cost rollup from child LLM calls.
-
-        Cost is ``None`` with status ``unknown`` when any child call is unpriced
-        (ADR-0002 — a node's cost is only trustworthy if every call is priced).
-        """
-        unknown = sa.case((LlmCallModel.cost_status == "unknown", 1), else_=0)
-        rows = await self._session.execute(
-            sa.select(
-                LlmCallModel.node_execution_id,
-                sa.func.coalesce(sa.func.sum(LlmCallModel.input_tokens), 0),
-                sa.func.coalesce(sa.func.sum(LlmCallModel.output_tokens), 0),
-                sa.func.coalesce(sa.func.sum(LlmCallModel.cost), 0),
-                sa.func.coalesce(sa.func.sum(unknown), 0),
-            )
-            .where(
-                LlmCallModel.execution_id == execution_id,
-                LlmCallModel.node_execution_id.is_not(None),
-            )
-            .group_by(LlmCallModel.node_execution_id)
-        )
-        result: dict[UUID, tuple[TokenUsage, Decimal | None, str]] = {}
-        for node_id, inp, out, cost, unknown_calls in rows.all():
-            tokens = TokenUsage(int(inp), int(out))
-            if int(unknown_calls) > 0:
-                result[node_id] = (tokens, None, "unknown")
-            else:
-                result[node_id] = (tokens, Decimal(str(cost)), "priced")
-        return result
 
     async def sum_usage(self, execution_id: UUID) -> tuple[TokenUsage, Decimal]:
         result = (
@@ -660,18 +672,6 @@ class PostgresToolCallRepository:
             .order_by(ToolCallModel.started_at)
         )
         return [_tool_to_entity(r) for r in rows]
-
-    async def node_ids_with_calls(self, execution_id: UUID) -> set[UUID]:
-        """Node ids that have at least one tool call — for category inference."""
-        rows = await self._session.scalars(
-            sa.select(ToolCallModel.node_execution_id)
-            .where(
-                ToolCallModel.execution_id == execution_id,
-                ToolCallModel.node_execution_id.is_not(None),
-            )
-            .distinct()
-        )
-        return {r for r in rows if r is not None}
 
 
 class PostgresStateSnapshotRepository:

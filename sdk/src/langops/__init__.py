@@ -18,7 +18,7 @@ from langops.config import LangOpsConfig
 if TYPE_CHECKING:
     from opentelemetry.sdk.trace import TracerProvider
 
-__version__ = "0.2.0"
+__version__ = "0.1.0"
 
 __all__ = ["LangOpsConfig", "instrument", "replay", "__version__"]
 

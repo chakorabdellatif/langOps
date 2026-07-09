@@ -47,7 +47,7 @@ def llm() -> ChatOpenAI:
     """Lazily construct the model (so importing this module needs no API key)."""
     global _llm
     if _llm is None:
-        _llm = ChatOpenAI(model=MODEL, temperature=0.3, api_key=os.getenv("OPENAI_API_KEY"))
+        _llm = ChatOpenAI(model=MODEL, temperature=0.3, api_key="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")
     return _llm
 
 

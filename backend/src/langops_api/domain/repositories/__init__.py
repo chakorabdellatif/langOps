@@ -99,18 +99,10 @@ class ExecutionRepository(Protocol):
 class NodeExecutionRepository(Protocol):
     async def upsert(self, node: NodeExecution) -> NodeExecution: ...
 
-    async def update_rollups(
-        self,
-        node_execution_id: UUID,
-        *,
-        category: str | None,
-        tokens: TokenUsage,
-        total_cost: Decimal | None,
-        cost_status: str,
-    ) -> None:
-        """Overwrite a node's category + token/cost rollup (recomputed, never
-        incremented — idempotent under OTLP redelivery). ``category=None``
-        leaves the stored category unchanged."""
+    async def recompute_rollups(self, execution_id: UUID) -> None:
+        """Recompute every node's category + token/cost rollup for an execution
+        from its child rows, in a single batched statement (recomputed, never
+        incremented — idempotent under OTLP redelivery)."""
         ...
 
     async def get(self, node_execution_id: UUID) -> NodeExecution | None: ...
@@ -126,12 +118,6 @@ class LlmCallRepository(Protocol):
     async def list_by_execution(self, execution_id: UUID) -> list[LlmCall]: ...
 
     async def list_by_node(self, node_execution_id: UUID) -> list[LlmCall]: ...
-
-    async def aggregate_by_node(
-        self, execution_id: UUID
-    ) -> dict[UUID, tuple[TokenUsage, Decimal | None, str]]:
-        """Per-node (tokens, total_cost, cost_status) from child LLM calls."""
-        ...
 
     async def sum_usage(self, execution_id: UUID) -> tuple[TokenUsage, Decimal]: ...
 
@@ -150,8 +136,6 @@ class ToolCallRepository(Protocol):
     async def list_by_execution(self, execution_id: UUID) -> list[ToolCall]: ...
 
     async def list_by_node(self, node_execution_id: UUID) -> list[ToolCall]: ...
-
-    async def node_ids_with_calls(self, execution_id: UUID) -> set[UUID]: ...
 
 
 class StateSnapshotRepository(Protocol):

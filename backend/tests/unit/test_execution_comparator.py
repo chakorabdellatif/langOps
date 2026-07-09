@@ -89,3 +89,34 @@ def test_node_latency_spike_insight() -> None:
     result = ExecutionComparator().compare(a, b)
     spike = next(i for i in result.insights if i.metric == "node_latency")
     assert "summary" in spike.text and "71%" in spike.text
+
+
+def test_zero_cost_compares_as_zero_percent_not_incomparable() -> None:
+    # Both runs genuinely cost $0 (e.g. local models priced 0/0). This is
+    # *known*, so it must compare as a 0% delta — not "incomparable".
+    result = ExecutionComparator().compare(
+        _input(total_cost=Decimal("0")), _input(total_cost=Decimal("0"))
+    )
+    cost = result.performance.cost
+    assert cost.comparable is True
+    assert cost.delta == 0.0
+    assert cost.delta_pct == 0.0
+
+
+def test_prompt_change_detected_at_equal_length() -> None:
+    # Same number of messages, same total chars, but different content — the
+    # char-count heuristic would miss this; the signature diff catches it.
+    a = _input(llm_calls=[LlmStat("m", 0.0, 10, 5, message_sigs=("system:aaa", "human:bbb"))])
+    b = _input(llm_calls=[LlmStat("m", 0.0, 10, 5, message_sigs=("system:aaa", "human:ccc"))])
+    result = ExecutionComparator().compare(a, b)
+    assert result.llm_changes.prompt_changed is True
+    assert result.llm_changes.prompt_first_divergence == 1  # second message differs
+
+
+def test_identical_prompts_report_no_divergence() -> None:
+    sigs = ("system:aaa", "human:bbb")
+    a = _input(llm_calls=[LlmStat("m", 0.0, 10, 5, message_sigs=sigs)])
+    b = _input(llm_calls=[LlmStat("m", 0.0, 10, 5, message_sigs=sigs)])
+    result = ExecutionComparator().compare(a, b)
+    assert result.llm_changes.prompt_changed is False
+    assert result.llm_changes.prompt_first_divergence is None
