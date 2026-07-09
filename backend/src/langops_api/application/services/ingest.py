@@ -26,6 +26,7 @@ from langops_api.domain.repositories import (
     ToolCallRepository,
 )
 from langops_api.domain.services import CostCalculator, StateDiffer
+from langops_api.domain.value_objects import Cost
 from langops_api.infrastructure.otlp import ParsedSpan
 
 logger = structlog.get_logger("langops_api.ingest")
@@ -119,7 +120,10 @@ class IngestTelemetryService:
         for call, parent_span_id in trace.llm_calls:
             call.execution_id = execution_id
             call.node_execution_id = await resolve_node(parent_span_id)
-            if call.provider and call.model:
+            if call.stubbed:
+                # Served from a recording during cached replay — it cost nothing.
+                call.cost = Cost.free()
+            elif call.provider and call.model:
                 pricing = await self._pricing.get_price(call.provider, call.model, call.started_at)
                 call.cost = self._cost_calculator.calculate(call.tokens, pricing)
                 if pricing is None:

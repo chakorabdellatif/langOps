@@ -98,6 +98,8 @@ class LlmCall:
     latency_ms: int | None = None
     started_at: datetime | None = None
     error: dict[str, Any] | None = None
+    # v0.1 cached replay: response was served from a recording — costs nothing.
+    stubbed: bool = False
 
 
 @dataclass

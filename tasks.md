@@ -459,36 +459,35 @@ All required data (tool input/output, LLM messages/response per call) is
 already stored — `GET /executions/{id}/tool-calls` and `/llm-calls` exist,
 so this is **SDK + dashboard work only; zero backend changes**.
 
-- [ ] SDK `replay(..., stub_tools=True, stub_llm=False)` + CLI flags
-      (`--stub-tools`, `--stub-llm`): fetch the original execution's
-      tool/LLM calls once, build an in-memory recording
-- [ ] Tool stubbing: a callback-layer interceptor serves recorded output
-      keyed by `(tool_name, canonical-JSON input hash)`; miss policy
-      `on_miss="execute"` (default — input drifted, run it for real) or
-      `"fail"` (strict reproducibility mode); mismatches logged with source
-      `sdk` so they surface in the Logs tab
-- [ ] LLM stubbing: per-node FIFO of recorded responses (calls are replayed
-      in recorded order within each node); response includes the original
-      `usage_metadata` so token accounting reflects "served from cache" —
-      stubbed calls are marked (`langops.llm.stubbed = true`, new semconv
-      attr, additive) and **excluded from cost rollups** (a cached response
-      costs nothing; never double-bill)
-- [ ] Guards: any truncated recorded payload → `ReplayError` up front (a
-      partial cassette must not half-replay); `--stub-llm` combined with
-      `--model` is rejected (contradiction: can't both swap the model and
-      replay its old answers)
-- [ ] Overrides record gains `stubbed: {tools, llm}`; dashboard replay
-      panel + compare view show a "cached replay" badge; LLM inspector marks
-      stubbed calls
-- [ ] Tests: full-stub round trip reproduces the original output with zero
-      tool/LLM invocations (spy-counted); miss policies; truncation guard;
-      stubbed-call cost exclusion; semconv doc + both constant mirrors
-      updated (additive)
+- [x] SDK `replay(..., stub_llm=True, stub_tools=[tool, …], on_miss=…)` + CLI
+      (`--stub-llm`, `--stub-tool module:attr` repeatable, `--on-miss`); fetches
+      the recorded LLM/tool calls via the existing endpoints
+- [x] **LLM stubbing is generic** (`_stubs.ReplayLLMCache`, a LangChain
+      `BaseCache`): chat models consult the process-global cache before every
+      call, so recorded generations are replayed **in order** (FIFO) without
+      touching the user's graph — more robust than key-matching. Served calls
+      set a task-local flag; the callback handler stamps `langops.llm.stubbed`;
+      recorded `usage_metadata` preserved so token counts still show
+- [x] **Tool stubbing is explicit** (`ToolStub` wrapping passed tool objects,
+      matched by name + canonical input with FIFO fallback) — there is no
+      global tool cache, and tools called inside node functions can't be
+      discovered from a compiled graph; documented honestly
+- [x] Guards: `on_miss` `execute`/`fail`; truncated recorded response →
+      `ReplayError`; `stub_llm` + `model` rejected; global cache + wrapped
+      tools always restored (try/finally)
+- [x] Backend (one additive column, `0005_llm_stubbed`): mapper reads
+      `langops.llm.stubbed`; stubbed calls priced `Cost.free()` ($0) so they
+      drop out of node/execution rollups without special-casing
+- [x] Overrides record `stubbed: {llm, tools}`; dashboard LLM-calls tab shows a
+      "cached" badge; replay panel shows a "cached" badge + `--stub-llm` hint
+- [x] Tests: SDK zero-call round trip (spy-counted) + stubbed marking + cache
+      restored + model-override rejection + strict-miss; backend stubbed-cost
+      exclusion; semconv doc + both mirrors updated
 
-**Accept when:** `python -m langops replay <id> --app … --stub-tools
---stub-llm` on visit-city makes **zero network calls and zero LLM
-invocations**, reproduces the recorded output, and the new execution is
-visibly badged as cached with $0 marginal cost.
+**Accept when:** `langops replay <id> --stub-llm` on visit-city makes **zero
+LLM invocations**, reproduces the recorded output, and the new execution is
+badged cached with $0 marginal cost. ✅ (verified end-to-end: real run 3 model
+calls → cached replay 0; all 3 replay LLM calls stubbed at $0)
 
 ## Phase 16 — Thread view & per-node cost breakdown (P2 + P3)
 

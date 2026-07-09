@@ -259,7 +259,7 @@ function LlmCallsTab({ executionId }: { executionId: string }) {
     <div className="space-y-4">
       {data.map((call) => (
         <Card key={call.id} title={`${call.provider ?? "?"} · ${call.model ?? "unknown model"}`}>
-          <div className="mb-3 flex flex-wrap gap-4 text-xs text-neutral-400">
+          <div className="mb-3 flex flex-wrap items-center gap-4 text-xs text-neutral-400">
             <span>
               in <Tokens n={call.input_tokens} /> / out <Tokens n={call.output_tokens} />
             </span>
@@ -269,6 +269,14 @@ function LlmCallsTab({ executionId }: { executionId: string }) {
             <span>
               <Duration ms={call.latency_ms} />
             </span>
+            {call.stubbed && (
+              <span
+                className="rounded bg-violet-500/15 px-2 py-0.5 text-violet-300 ring-1 ring-violet-500/30"
+                title="Response served from the recording during cached replay — no tokens spent"
+              >
+                cached
+              </span>
+            )}
           </div>
           <div className="grid gap-3 md:grid-cols-2">
             <div>

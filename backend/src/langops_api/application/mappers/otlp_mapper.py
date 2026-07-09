@@ -238,6 +238,7 @@ def _map_llm(trace: MappedTrace, span: ParsedSpan) -> None:
         latency_ms=_duration_ms(span),
         started_at=_ts(span.start_ns),
         error=_error(span),
+        stubbed=bool(span.attributes.get(semconv.LLM_STUBBED, False)),
     )
     trace.llm_calls.append((call, span.parent_span_id))
 

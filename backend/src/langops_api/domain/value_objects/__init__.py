@@ -79,5 +79,15 @@ class Cost:
     def unknown(cls) -> Cost:
         return cls(status=CostStatus.UNKNOWN)
 
+    @classmethod
+    def free(cls) -> Cost:
+        """A known, zero cost — e.g. an LLM response served from a recording."""
+        return cls(
+            input_cost=ZERO_COST,
+            output_cost=ZERO_COST,
+            total_cost=ZERO_COST,
+            status=CostStatus.PRICED,
+        )
+
 
 ZERO_COST = Decimal("0")

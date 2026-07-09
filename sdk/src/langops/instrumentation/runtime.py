@@ -49,6 +49,11 @@ class ReplayInfo:
 
 replay_context: ContextVar[ReplayInfo | None] = ContextVar("langops_replay", default=None)
 
+# Set by the replay LLM cache when it serves (or misses) a recorded response,
+# read by the callback handler to mark the LLM span as stubbed. Task-local, so
+# concurrent nodes each see their own value.
+llm_stub_served: ContextVar[bool | None] = ContextVar("langops_llm_stub_served", default=None)
+
 
 def add_payload_event(
     span: Span,

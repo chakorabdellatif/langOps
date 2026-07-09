@@ -19,7 +19,7 @@ from opentelemetry.trace import Span, Status, StatusCode
 
 from langops import semconv
 from langops.config import LangOpsConfig
-from langops.instrumentation.runtime import add_payload_event, current_run
+from langops.instrumentation.runtime import add_payload_event, current_run, llm_stub_served
 
 logger = logging.getLogger("langops")
 
@@ -219,6 +219,10 @@ class LangOpsCallbackHandler(BaseCallbackHandler):
             span = self._finish(run_id)
             if span is None:
                 return
+            # Cached replay: mark spans whose response came from the recording.
+            if llm_stub_served.get():
+                span.set_attribute(semconv.LLM_STUBBED, True)
+                llm_stub_served.set(None)
             usage = _extract_usage(response)
             if usage:
                 span.set_attribute(semconv.GEN_AI_USAGE_INPUT_TOKENS, usage[0])

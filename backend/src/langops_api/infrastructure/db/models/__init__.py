@@ -143,6 +143,8 @@ class LlmCallModel(Base):
     latency_ms: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(sa.TIMESTAMP(timezone=True), nullable=True)
     error: Mapped[Any | None] = mapped_column(JSONType, nullable=True)
+    # v0.1 cached replay: served from a recording (excluded from cost).
+    stubbed: Mapped[bool] = mapped_column(sa.Boolean, default=False)
 
 
 class ToolCallModel(Base):
