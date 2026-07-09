@@ -82,6 +82,42 @@ export default function CostsPage() {
           </tbody>
         </table>
       </Card>
+
+      {data.by_node.length > 0 && (
+        <Card title="By node — which nodes burn the budget">
+          <table className="w-full text-sm">
+            <thead className="text-left text-xs uppercase text-neutral-500">
+              <tr>
+                <th className="pb-2">Node</th>
+                <th className="pb-2">Calls</th>
+                <th className="pb-2">Tokens</th>
+                <th className="pb-2">Cost</th>
+                <th className="pb-2">Share</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-neutral-800">
+              {data.by_node.map((n, i) => {
+                const share = data.total_cost > 0 ? (n.total_cost / data.total_cost) * 100 : 0;
+                return (
+                  <tr key={i}>
+                    <td className="py-2">{n.node_name}</td>
+                    <td className="py-2">{n.calls}</td>
+                    <td className="py-2">
+                      <Tokens n={n.input_tokens + n.output_tokens} />
+                    </td>
+                    <td className="py-2">
+                      <Cost usd={n.total_cost} status={n.unknown_calls > 0 ? "unknown" : "priced"} />
+                    </td>
+                    <td className="py-2 text-neutral-400">
+                      {n.unknown_calls > 0 ? "—" : `${share.toFixed(0)}%`}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </Card>
+      )}
     </div>
   );
 }

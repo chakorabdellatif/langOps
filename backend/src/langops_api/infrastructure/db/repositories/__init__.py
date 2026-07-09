@@ -372,6 +372,66 @@ class PostgresExecutionRepository:
         )
         return [_execution_to_entity(r) for r in rows]
 
+    async def list_threads(
+        self, project_id: UUID, *, page: int = 1, page_size: int = 20
+    ) -> tuple[list[dict[str, Any]], int]:
+        tokens = ExecutionModel.total_input_tokens + ExecutionModel.total_output_tokens
+        status_count = lambda value: sa.func.coalesce(  # noqa: E731
+            sa.func.sum(sa.case((ExecutionModel.status == value, 1), else_=0)), 0
+        )
+        grouped = (
+            sa.select(
+                ExecutionModel.thread_id,
+                sa.func.count().label("run_count"),
+                sa.func.min(ExecutionModel.started_at).label("first_at"),
+                sa.func.max(ExecutionModel.started_at).label("last_at"),
+                sa.func.coalesce(sa.func.sum(tokens), 0).label("tokens"),
+                sa.func.coalesce(sa.func.sum(ExecutionModel.total_cost), 0).label("cost"),
+                status_count("succeeded").label("succeeded"),
+                status_count("failed").label("failed"),
+                status_count("running").label("running"),
+            )
+            .where(
+                ExecutionModel.project_id == project_id,
+                ExecutionModel.thread_id.is_not(None),
+            )
+            .group_by(ExecutionModel.thread_id)
+        )
+        total = await self._session.scalar(
+            sa.select(sa.func.count()).select_from(grouped.subquery())
+        )
+        rows = await self._session.execute(
+            grouped.order_by(sa.func.max(ExecutionModel.started_at).desc().nulls_last())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        )
+        items = [
+            {
+                "thread_id": r.thread_id,
+                "run_count": int(r.run_count),
+                "first_at": r.first_at,
+                "last_at": r.last_at,
+                "total_tokens": int(r.tokens),
+                "total_cost": float(r.cost),
+                "succeeded": int(r.succeeded),
+                "failed": int(r.failed),
+                "running": int(r.running),
+            }
+            for r in rows.all()
+        ]
+        return items, int(total or 0)
+
+    async def list_by_thread(self, project_id: UUID, thread_id: str) -> list[Execution]:
+        rows = await self._session.scalars(
+            sa.select(ExecutionModel)
+            .where(
+                ExecutionModel.project_id == project_id,
+                ExecutionModel.thread_id == thread_id,
+            )
+            .order_by(ExecutionModel.started_at.asc().nulls_last())
+        )
+        return [_execution_to_entity(r) for r in rows]
+
     async def update_rollups(
         self, execution_id: UUID, tokens: TokenUsage, total_cost: Decimal
     ) -> None:
@@ -630,6 +690,42 @@ class PostgresLlmCallRepository:
             .order_by(day)
         )
         return [{"day": str(d), "total_cost": float(cost)} for d, cost in rows.all()]
+
+    async def cost_by_node(
+        self, project_id: UUID, graph_id: UUID | None = None
+    ) -> list[dict[str, Any]]:
+        """Per-node-name cost rollup (join through node_executions). Unknown-cost
+        calls are counted separately so the dashboard never renders them as $0."""
+        unknown = sa.case((LlmCallModel.cost_status == "unknown", 1), else_=0)
+        query = (
+            sa.select(
+                NodeExecutionModel.node_name,
+                sa.func.coalesce(sa.func.sum(LlmCallModel.input_tokens), 0),
+                sa.func.coalesce(sa.func.sum(LlmCallModel.output_tokens), 0),
+                sa.func.coalesce(sa.func.sum(LlmCallModel.cost), 0),
+                sa.func.count(),
+                sa.func.coalesce(sa.func.sum(unknown), 0),
+            )
+            .join(NodeExecutionModel, NodeExecutionModel.id == LlmCallModel.node_execution_id)
+            .join(ExecutionModel, ExecutionModel.id == LlmCallModel.execution_id)
+            .where(ExecutionModel.project_id == project_id)
+            .group_by(NodeExecutionModel.node_name)
+            .order_by(sa.func.coalesce(sa.func.sum(LlmCallModel.cost), 0).desc())
+        )
+        if graph_id is not None:
+            query = query.where(ExecutionModel.graph_id == graph_id)
+        rows = await self._session.execute(query)
+        return [
+            {
+                "node_name": name,
+                "input_tokens": int(inp),
+                "output_tokens": int(out),
+                "total_cost": float(cost),
+                "calls": int(calls),
+                "unknown_calls": int(unknown_calls),
+            }
+            for name, inp, out, cost, calls, unknown_calls in rows.all()
+        ]
 
 
 class PostgresToolCallRepository:

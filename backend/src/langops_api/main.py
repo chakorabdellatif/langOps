@@ -26,6 +26,7 @@ from langops_api.presentation.api.v1.health import router as health_router
 from langops_api.presentation.api.v1.logs import router as logs_router
 from langops_api.presentation.api.v1.metrics import router as metrics_router
 from langops_api.presentation.api.v1.nodes import router as nodes_router
+from langops_api.presentation.api.v1.threads import router as threads_router
 from langops_api.presentation.events import router as events_router
 from langops_api.presentation.ingest import router as ingest_router
 
@@ -106,6 +107,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(costs_router, prefix="/api/v1")
     app.include_router(metrics_router, prefix="/api/v1")
     app.include_router(logs_router, prefix="/api/v1")
+    app.include_router(threads_router, prefix="/api/v1")
     app.include_router(events_router, prefix="/api/v1")
     app.include_router(ingest_router)  # OTLP-spec path: POST /v1/traces
 

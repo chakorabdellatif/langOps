@@ -58,6 +58,44 @@ class LogPage:
 
 
 @dataclass
+class ThreadSummary:
+    """One conversation/session: all executions sharing a thread_id."""
+
+    thread_id: str
+    run_count: int
+    first_at: datetime | None
+    last_at: datetime | None
+    total_tokens: int
+    total_cost: float
+    succeeded: int
+    failed: int
+    running: int
+
+
+@dataclass
+class ThreadPage:
+    items: list[ThreadSummary]
+    total: int
+    page: int
+    page_size: int
+
+
+@dataclass
+class ThreadRun:
+    """One execution within a thread, with running cumulative totals."""
+
+    execution: Execution
+    cumulative_tokens: int
+    cumulative_cost: float
+
+
+@dataclass
+class ThreadDetail:
+    thread_id: str
+    runs: list[ThreadRun]
+
+
+@dataclass
 class TimelineEntry:
     kind: str  # node | llm | tool
     id: str

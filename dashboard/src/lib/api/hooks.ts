@@ -18,6 +18,8 @@ import type {
   MetricsOverview,
   NodeDetail,
   StateEvolution,
+  ThreadDetail,
+  ThreadList,
   TimelineEntry,
   ToolCall,
 } from "./types";
@@ -122,6 +124,21 @@ export function useCostSummary() {
   return useQuery({
     queryKey: queryKeys.costs.summary({}),
     queryFn: () => apiFetch<CostSummary>("/api/v1/costs/summary"),
+  });
+}
+
+export function useThreads(page = 1) {
+  return useQuery({
+    queryKey: queryKeys.threads.list({ page }),
+    queryFn: () => apiFetch<ThreadList>(`/api/v1/threads?page=${page}`),
+    refetchInterval: 5000,
+  });
+}
+
+export function useThread(threadId: string) {
+  return useQuery({
+    queryKey: queryKeys.threads.detail(threadId),
+    queryFn: () => apiFetch<ThreadDetail>(`/api/v1/threads/${encodeURIComponent(threadId)}`),
   });
 }
 

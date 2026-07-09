@@ -48,6 +48,16 @@ class ExecutionRepository(Protocol):
         """Executions that replayed ``execution_id`` (newest first)."""
         ...
 
+    async def list_threads(
+        self, project_id: UUID, *, page: int = 1, page_size: int = 20
+    ) -> tuple[list[dict[str, Any]], int]:
+        """Executions grouped by thread_id (most-recent first) + total thread count."""
+        ...
+
+    async def list_by_thread(self, project_id: UUID, thread_id: str) -> list[Execution]:
+        """All executions of a thread, oldest first (conversation order)."""
+        ...
+
     async def upsert(self, execution: Execution, *, enrich_only: bool = False) -> Execution:
         """Insert by trace_id or merge non-empty fields into the existing row.
 
@@ -127,6 +137,12 @@ class LlmCallRepository(Protocol):
 
     async def cost_by_day(self, project_id: UUID) -> list[dict[str, Any]]:
         """Per-day total cost (UTC), oldest first."""
+        ...
+
+    async def cost_by_node(
+        self, project_id: UUID, graph_id: UUID | None = None
+    ) -> list[dict[str, Any]]:
+        """Per-node-name rollup: tokens, cost, calls, unknown count."""
         ...
 
 
