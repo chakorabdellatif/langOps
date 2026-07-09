@@ -250,6 +250,25 @@ export interface CostSummary {
   by_node: CostByNode[];
 }
 
+export interface SearchHit {
+  kind: string;
+  label: string;
+  detail: string | null;
+  execution_id: string | null;
+  node_execution_id: string | null;
+}
+
+export interface SearchGroup {
+  kind: string;
+  total: number;
+  hits: SearchHit[];
+}
+
+export interface SearchResults {
+  query: string;
+  groups: SearchGroup[];
+}
+
 export interface ThreadSummary {
   thread_id: string;
   run_count: number;

@@ -17,6 +17,7 @@ import type {
   LogPage,
   MetricsOverview,
   NodeDetail,
+  SearchResults,
   StateEvolution,
   ThreadDetail,
   ThreadList,
@@ -27,6 +28,8 @@ import type {
 export interface ExecutionFilters {
   status?: string;
   thread_id?: string;
+  model?: string;
+  has_retries?: boolean;
   page?: number;
   page_size?: number;
 }
@@ -139,6 +142,14 @@ export function useThread(threadId: string) {
   return useQuery({
     queryKey: queryKeys.threads.detail(threadId),
     queryFn: () => apiFetch<ThreadDetail>(`/api/v1/threads/${encodeURIComponent(threadId)}`),
+  });
+}
+
+export function useSearch(q: string) {
+  return useQuery({
+    queryKey: ["search", q],
+    queryFn: () => apiFetch<SearchResults>(`/api/v1/search?q=${encodeURIComponent(q)}`),
+    enabled: q.trim().length > 0,
   });
 }
 

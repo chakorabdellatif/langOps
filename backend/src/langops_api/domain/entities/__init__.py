@@ -100,6 +100,8 @@ class LlmCall:
     error: dict[str, Any] | None = None
     # v0.1 cached replay: response was served from a recording — costs nothing.
     stubbed: bool = False
+    # Flattened prompt+response text for full-text search (extracted at ingest).
+    text_content: str | None = None
 
 
 @dataclass

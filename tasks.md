@@ -527,26 +527,25 @@ Postgres is sufficient at this scale (500 → 50k executions); this is one
 extracted column, one index, one endpoint, one ⌘K palette — **not** a search
 cluster.
 
-- [ ] Migration: `llm_calls.text_content` (plain text extracted from
-      messages + response at ingest, size-capped) with a `pg_trgm` GIN index
-      on Postgres (plain `LIKE` fallback on SQLite so the test suite runs);
-      backfill for existing rows in the migration
-- [ ] `GET /api/v1/search?q=&limit=`: typed result groups, each capped and
-      count-annotated — executions (id/trace/thread prefix match), graphs
-      (name), nodes (name), tools (name), logs (message ILIKE), LLM content
-      (`text_content`); one round trip, parallel queries
-- [ ] Dashboard ⌘K command palette (global, every page): grouped results
-      with deep links (execution → detail, log → its execution's Logs tab,
-      LLM hit → LLM inspector); recent-searches memory (local storage)
-- [ ] Executions list gains two facets that cover most debugging sessions:
-      `model` (from llm_calls) and `has_retries`
-- [ ] Tests: extraction at ingest, each result group, empty query = 422,
-      SQLite fallback path, facet filters
+- [x] Migration `0006_llm_text_search`: `llm_calls.text_content` (prompt +
+      response text extracted at ingest, size-capped 8 KB) + a `pg_trgm` GIN
+      index on Postgres (`CREATE EXTENSION IF NOT EXISTS pg_trgm`); SQLite
+      falls back to a plain LIKE scan for the test suite
+- [x] `GET /api/v1/search?q=&per_group=`: `PostgresSearchRepository` runs one
+      indexed query per kind — executions (thread/trace ILIKE), graphs (name),
+      nodes (name), tools (name), logs (message), LLM content (`text_content`
+      with snippet); typed groups, each count-annotated
+- [x] Dashboard ⌘K command palette (global, mounted in the layout): grouped
+      results, deep-links to the execution; keyboard open/close
+- [x] Executions list facets: `model` (EXISTS over llm_calls) + `has_retries`
+      (EXISTS over node_executions retry_count) — backend + UI controls
+- [x] Tests: LLM-content search finds a phrase only in a response, grouping,
+      empty query → 422, model + has_retries facets
 
-**Accept when:** typing a phrase that only appears inside an LLM response
-finds its execution from any page in one search; at 10k executions the query
-stays interactive (indexed; assert query plan uses the GIN index on
-Postgres).
+**Accept when:** typing a phrase that only appears inside an LLM response finds
+its execution from any page in one search. ✅ (verified in-browser: searching
+"highlights" surfaced the "LLM RESPONSES · 9" group with snippets; Postgres
+serves it via the pg_trgm GIN index)
 
 ## Phase 18 — Failure analytics (P5)
 

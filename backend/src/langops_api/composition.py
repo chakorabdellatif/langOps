@@ -21,6 +21,7 @@ from langops_api.application.services.queries import (
     GetNodeDetailService,
     ListExecutionsService,
     SearchLogsService,
+    SearchService,
 )
 from langops_api.application.services.reports import (
     CompareExecutionsService,
@@ -44,6 +45,7 @@ from langops_api.infrastructure.db.repositories import (
     PostgresLogRepository,
     PostgresNodeExecutionRepository,
     PostgresProjectRepository,
+    PostgresSearchRepository,
     PostgresStateSnapshotRepository,
     PostgresToolCallRepository,
 )
@@ -211,6 +213,15 @@ def get_cost_report_service(
     return GetCostReportService(
         projects=PostgresProjectRepository(session),
         llm_calls=PostgresLlmCallRepository(session),
+    )
+
+
+def get_search_service(
+    session: AsyncSession = Depends(get_session),
+) -> SearchService:
+    return SearchService(
+        projects=PostgresProjectRepository(session),
+        search=PostgresSearchRepository(session),
     )
 
 

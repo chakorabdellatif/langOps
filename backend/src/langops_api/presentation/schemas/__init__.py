@@ -20,6 +20,7 @@ from langops_api.application.dto import (
     MetricsOverview,
     NodeDetail,
     NodeView,
+    SearchResults,
     StateEvolution,
     ThreadDetail,
     ThreadPage,
@@ -464,6 +465,39 @@ class CostSummaryResponse(BaseModel):
     by_model: list[dict[str, Any]]
     by_day: list[dict[str, Any]]
     by_node: list[dict[str, Any]]
+
+
+class SearchHitResponse(BaseModel):
+    kind: str
+    label: str
+    detail: str | None
+    execution_id: str | None
+    node_execution_id: str | None
+
+
+class SearchGroupResponse(BaseModel):
+    kind: str
+    total: int
+    hits: list[SearchHitResponse]
+
+
+class SearchResponse(BaseModel):
+    query: str
+    groups: list[SearchGroupResponse]
+
+    @classmethod
+    def from_dto(cls, results: SearchResults) -> SearchResponse:
+        return cls(
+            query=results.query,
+            groups=[
+                SearchGroupResponse(
+                    kind=group.kind,
+                    total=group.total,
+                    hits=[SearchHitResponse(**hit.__dict__) for hit in group.hits],
+                )
+                for group in results.groups
+            ],
+        )
 
 
 class ThreadSummaryResponse(BaseModel):

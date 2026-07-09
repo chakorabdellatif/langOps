@@ -145,6 +145,8 @@ class LlmCallModel(Base):
     error: Mapped[Any | None] = mapped_column(JSONType, nullable=True)
     # v0.1 cached replay: served from a recording (excluded from cost).
     stubbed: Mapped[bool] = mapped_column(sa.Boolean, default=False)
+    # Flattened prompt+response text for full-text search (pg_trgm on Postgres).
+    text_content: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
 
 
 class ToolCallModel(Base):

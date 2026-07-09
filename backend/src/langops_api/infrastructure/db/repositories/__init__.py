@@ -452,6 +452,8 @@ class PostgresExecutionRepository:
         status: str | None = None,
         graph_id: UUID | None = None,
         thread_id: str | None = None,
+        model: str | None = None,
+        has_retries: bool | None = None,
         since: datetime | None = None,
         until: datetime | None = None,
         page: int = 1,
@@ -464,6 +466,19 @@ class PostgresExecutionRepository:
             query = query.where(ExecutionModel.graph_id == graph_id)
         if thread_id:
             query = query.where(ExecutionModel.thread_id == thread_id)
+        if model:
+            query = query.where(
+                sa.exists().where(
+                    LlmCallModel.execution_id == ExecutionModel.id,
+                    LlmCallModel.model == model,
+                )
+            )
+        if has_retries is not None:
+            retried = sa.exists().where(
+                NodeExecutionModel.execution_id == ExecutionModel.id,
+                NodeExecutionModel.retry_count > 0,
+            )
+            query = query.where(retried if has_retries else ~retried)
         if since:
             query = query.where(ExecutionModel.started_at >= since)
         if until:
@@ -619,6 +634,7 @@ class PostgresLlmCallRepository:
         row.started_at = call.started_at or row.started_at
         row.error = call.error if call.error is not None else row.error
         row.stubbed = call.stubbed
+        row.text_content = call.text_content if call.text_content is not None else row.text_content
         await self._session.flush()
         return _llm_to_entity(row)
 
@@ -886,6 +902,176 @@ class PostgresLogRepository:
             query.order_by(LogModel.timestamp.desc().nulls_last()).offset(offset).limit(limit)
         )
         return [_log_to_entity(r) for r in rows], int(total or 0)
+
+
+class PostgresSearchRepository:
+    """Global search — one indexed query per entity kind (executions, graphs,
+    nodes, tools, logs, LLM content). Uses ILIKE; on Postgres the LLM-content
+    scan is served by the pg_trgm GIN index from migration 0006."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def search(
+        self, project_id: UUID, q: str, *, per_group: int = 8
+    ) -> dict[str, tuple[int, list[dict[str, Any]]]]:
+        like = f"%{q}%"
+        return {
+            "execution": await self._executions(project_id, like, per_group),
+            "graph": await self._graphs(project_id, like, per_group),
+            "node": await self._nodes(project_id, like, per_group),
+            "tool": await self._tools(project_id, like, per_group),
+            "log": await self._logs(project_id, like, per_group),
+            "llm": await self._llm(project_id, like, per_group),
+        }
+
+    async def _count_and_rows(
+        self, base: Any, order: Any, limit: int, to_hit: Any
+    ) -> tuple[int, list[dict[str, Any]]]:
+        total = await self._session.scalar(sa.select(sa.func.count()).select_from(base.subquery()))
+        rows = await self._session.execute(base.order_by(order).limit(limit))
+        return int(total or 0), [to_hit(r) for r in rows.all()]
+
+    async def _executions(self, pid: UUID, like: str, n: int) -> tuple[int, list[dict[str, Any]]]:
+        base = sa.select(
+            ExecutionModel.id, ExecutionModel.thread_id, ExecutionModel.trace_id
+        ).where(
+            ExecutionModel.project_id == pid,
+            sa.or_(
+                ExecutionModel.thread_id.ilike(like),
+                ExecutionModel.trace_id.ilike(like),
+            ),
+        )
+        return await self._count_and_rows(
+            base,
+            ExecutionModel.started_at.desc().nulls_last(),
+            n,
+            lambda r: {
+                "label": r.thread_id or r.trace_id,
+                "detail": "execution",
+                "execution_id": str(r.id),
+                "node_execution_id": None,
+            },
+        )
+
+    async def _graphs(self, pid: UUID, like: str, n: int) -> tuple[int, list[dict[str, Any]]]:
+        base = sa.select(GraphModel.id, GraphModel.name).where(
+            GraphModel.project_id == pid, GraphModel.name.ilike(like)
+        )
+        return await self._count_and_rows(
+            base,
+            GraphModel.created_at.desc(),
+            n,
+            lambda r: {
+                "label": r.name,
+                "detail": "graph",
+                "execution_id": None,
+                "node_execution_id": None,
+            },
+        )
+
+    async def _nodes(self, pid: UUID, like: str, n: int) -> tuple[int, list[dict[str, Any]]]:
+        base = (
+            sa.select(
+                NodeExecutionModel.node_name,
+                sa.func.min(NodeExecutionModel.execution_id).label("execution_id"),
+            )
+            .join(ExecutionModel, ExecutionModel.id == NodeExecutionModel.execution_id)
+            .where(ExecutionModel.project_id == pid, NodeExecutionModel.node_name.ilike(like))
+            .group_by(NodeExecutionModel.node_name)
+        )
+        return await self._count_and_rows(
+            base,
+            NodeExecutionModel.node_name,
+            n,
+            lambda r: {
+                "label": r.node_name,
+                "detail": "node",
+                "execution_id": str(r.execution_id),
+                "node_execution_id": None,
+            },
+        )
+
+    async def _tools(self, pid: UUID, like: str, n: int) -> tuple[int, list[dict[str, Any]]]:
+        base = (
+            sa.select(
+                ToolCallModel.tool_name,
+                sa.func.min(ToolCallModel.execution_id).label("execution_id"),
+            )
+            .join(ExecutionModel, ExecutionModel.id == ToolCallModel.execution_id)
+            .where(ExecutionModel.project_id == pid, ToolCallModel.tool_name.ilike(like))
+            .group_by(ToolCallModel.tool_name)
+        )
+        return await self._count_and_rows(
+            base,
+            ToolCallModel.tool_name,
+            n,
+            lambda r: {
+                "label": r.tool_name,
+                "detail": "tool",
+                "execution_id": str(r.execution_id),
+                "node_execution_id": None,
+            },
+        )
+
+    async def _logs(self, pid: UUID, like: str, n: int) -> tuple[int, list[dict[str, Any]]]:
+        base = (
+            sa.select(
+                LogModel.message,
+                LogModel.execution_id,
+                LogModel.node_execution_id,
+                LogModel.level,
+            )
+            .join(ExecutionModel, ExecutionModel.id == LogModel.execution_id)
+            .where(ExecutionModel.project_id == pid, LogModel.message.ilike(like))
+        )
+        return await self._count_and_rows(
+            base,
+            LogModel.timestamp.desc().nulls_last(),
+            n,
+            lambda r: {
+                "label": r.message[:100],
+                "detail": f"log · {r.level}",
+                "execution_id": str(r.execution_id),
+                "node_execution_id": str(r.node_execution_id) if r.node_execution_id else None,
+            },
+        )
+
+    async def _llm(self, pid: UUID, like: str, n: int) -> tuple[int, list[dict[str, Any]]]:
+        base = (
+            sa.select(
+                LlmCallModel.execution_id,
+                LlmCallModel.node_execution_id,
+                LlmCallModel.model,
+                LlmCallModel.text_content,
+            )
+            .join(ExecutionModel, ExecutionModel.id == LlmCallModel.execution_id)
+            .where(
+                ExecutionModel.project_id == pid,
+                LlmCallModel.text_content.is_not(None),
+                LlmCallModel.text_content.ilike(like),
+            )
+        )
+        return await self._count_and_rows(
+            base,
+            LlmCallModel.started_at.desc().nulls_last(),
+            n,
+            lambda r: {
+                "label": (r.model or "llm") + " · " + _snippet(r.text_content, like),
+                "detail": "llm response",
+                "execution_id": str(r.execution_id),
+                "node_execution_id": str(r.node_execution_id) if r.node_execution_id else None,
+            },
+        )
+
+
+def _snippet(text: str | None, like: str) -> str:
+    if not text:
+        return ""
+    needle = like.strip("%").lower()
+    idx = text.lower().find(needle)
+    start = max(0, idx - 30)
+    return ("…" if start > 0 else "") + text[start : start + 80].strip()
 
 
 # Pricing is served from the JSON catalog (infrastructure/pricing/), not the DB
