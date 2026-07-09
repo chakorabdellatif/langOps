@@ -85,6 +85,30 @@ class Container:
         async with self.session_factory() as session, session.begin():
             await PostgresProjectRepository(session).get_or_create_default()
 
+    async def run_retention_once(self) -> None:
+        from langops_api.application.services.retention import RetentionService
+
+        async with self.session_factory() as session, session.begin():
+            service = RetentionService(PostgresExecutionRepository(session))
+            if self.settings.retention_days > 0:
+                await service.purge_older_than(self.settings.retention_days)
+            if self.settings.retention_prune_payloads_days > 0:
+                await service.prune_payloads_older_than(self.settings.retention_prune_payloads_days)
+
+    async def retention_loop(self) -> None:
+        """Periodic in-process retention (no cron dependency). Never crashes the
+        loop on error; sleeps ``retention_interval_hours`` between runs."""
+        import structlog
+
+        log = structlog.get_logger("langops_api.retention")
+        interval = max(1, self.settings.retention_interval_hours) * 3600
+        while True:
+            try:
+                await self.run_retention_once()
+            except Exception:  # noqa: BLE001 — retention must never take down the app
+                log.exception("retention_failed")
+            await asyncio.sleep(interval)
+
     async def dispose(self) -> None:
         await self.engine.dispose()
         if self.redis is not None:

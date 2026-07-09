@@ -317,6 +317,39 @@ class PostgresExecutionRepository:
         )
         return int(getattr(result, "rowcount", 0) or 0)
 
+    async def prune_payloads_older_than(self, cutoff: datetime) -> int:
+        """Null the large payload columns for executions older than ``cutoff``
+        while keeping the rows (and their rollups), so metrics/cost history
+        survives payload cleanup. Returns the number of executions pruned."""
+        old = sa.select(ExecutionModel.id).where(
+            ExecutionModel.started_at < cutoff,
+            ExecutionModel.input.is_not(None) | ExecutionModel.output.is_not(None),
+        )
+        await self._session.execute(
+            sa.update(LlmCallModel)
+            .where(LlmCallModel.execution_id.in_(old))
+            .values(messages=None, params=None, response=None)
+        )
+        await self._session.execute(
+            sa.update(ToolCallModel)
+            .where(ToolCallModel.execution_id.in_(old))
+            .values(input=None, output=None)
+        )
+        await self._session.execute(
+            sa.update(StateSnapshotModel)
+            .where(StateSnapshotModel.execution_id.in_(old))
+            .values(state=None)
+        )
+        result = await self._session.execute(
+            sa.update(ExecutionModel)
+            .where(
+                ExecutionModel.started_at < cutoff,
+                ExecutionModel.input.is_not(None) | ExecutionModel.output.is_not(None),
+            )
+            .values(input=None, output=None)
+        )
+        return int(getattr(result, "rowcount", 0) or 0)
+
     async def get_by_trace_id(self, trace_id: str) -> Execution | None:
         row = await self._session.scalar(
             sa.select(ExecutionModel).where(ExecutionModel.trace_id == trace_id)

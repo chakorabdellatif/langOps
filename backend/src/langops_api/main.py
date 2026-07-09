@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import Any
 
 import structlog
 from fastapi import FastAPI, Request
@@ -41,6 +42,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        import asyncio
+
         container = Container(settings)
         if settings.db_create_tables:
             # Test/dev convenience; real deployments migrate via Alembic.
@@ -51,7 +54,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 await conn.run_sync(Base.metadata.create_all)
         await container.ensure_default_project()
         app.state.container = container
+
+        retention_task: asyncio.Task[None] | None = None
+        if settings.retention_days > 0 or settings.retention_prune_payloads_days > 0:
+            retention_task = asyncio.create_task(container.retention_loop())
+
         yield
+
+        if retention_task is not None:
+            retention_task.cancel()
         await container.dispose()
 
     app = FastAPI(title="LangOps API", version="0.1.0", docs_url="/docs", lifespan=lifespan)
@@ -62,6 +73,33 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_methods=["GET", "POST"],
         allow_headers=["*"],
     )
+
+    # Optional single-tenant API-key auth. Off by default; when a key is set,
+    # every ingest/query path requires `Authorization: Bearer <key>` (health
+    # and the OpenAPI docs stay open for probes/discovery).
+    if settings.api_key:
+        import secrets
+
+        _open_prefixes = ("/api/v1/health", "/docs", "/openapi.json", "/redoc")
+        _protected_prefixes = ("/v1/", "/api/v1/")
+
+        @app.middleware("http")
+        async def require_api_key(request: Request, call_next: Any) -> Any:
+            path = request.url.path
+            protected = path.startswith(_protected_prefixes) and not path.startswith(_open_prefixes)
+            if protected:
+                header = request.headers.get("authorization", "")
+                provided = header[7:] if header.lower().startswith("bearer ") else ""
+                if not provided or not secrets.compare_digest(provided, settings.api_key):
+                    return JSONResponse(
+                        status_code=401,
+                        content={
+                            "code": "unauthorized",
+                            "message": "missing or invalid API key",
+                            "detail": None,
+                        },
+                    )
+            return await call_next(request)
 
     # Uniform error contract: {code, message, detail}
     @app.exception_handler(NotFoundError)

@@ -159,6 +159,28 @@ Aggregate entry points from the repo root (see the [Makefile](../Makefile)):
 
 ---
 
+## Production hardening (optional)
+
+**API-key auth.** Set `API_KEY` (compose reads `LANGOPS_API_KEY`) on the backend
+to require `Authorization: Bearer <key>` on every ingest and query request
+(health and `/docs` stay open). Point instrumented apps at it with
+`LangOpsConfig(api_key=...)` or the `LANGOPS_API_KEY` env var — the SDK adds the
+OTLP header automatically. For the dashboard, set `NEXT_PUBLIC_API_URL=/backend`
+and give its **server** runtime `BACKEND_URL` + `LANGOPS_API_KEY`; the
+`/backend` proxy route attaches the key server-side so it never reaches the
+browser. This is single-tenant protection — multi-user auth/SSO is on the
+roadmap.
+
+**Retention.** On by default in compose: `RETENTION_DAYS` (default 30, `0` =
+keep forever) deletes executions older than N days on a periodic in-process
+task — no cron. `RETENTION_PRUNE_PAYLOADS_DAYS` instead nulls the large payload
+columns (messages/response/state) while keeping token/cost rollup rows, so
+metrics and cost history survive payload cleanup. The one-shot job is still
+available: `python -m langops_api.retention --days N`.
+
+**Load sanity.** `python scripts/loadtest.py --n 100 [--api-key KEY]` fires N
+concurrent executions and reports ingest latency/throughput, asserting no loss.
+
 ## Verifying the pipeline
 
 The bundled example runs with no API key (uses a fake chat model):
