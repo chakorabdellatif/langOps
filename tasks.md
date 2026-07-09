@@ -386,8 +386,10 @@ in the visit-city run)
       cheap to cover)
 - [ ] `make e2e` extended: instrumented run with logs → inspect node badges
       via API → compare two runs → replay via CLI → assert lineage
-- [ ] Version bump + tag `v0.2.0`; publish `langops` 0.2.0 (after the
-      pending 0.1.0 release ships)
+- [ ] ~~Version bump + tag `v0.2.0`~~ — **superseded by Milestone 3**: the
+      tool has never shipped, so there is no 0.2 release; everything lands in
+      one first public `0.1.0` (Phase 19). Package versions realign to 0.1.0
+      in Phase 14.
 
 **Accept when:** clean machine: quickstart → run example twice → graph shows
 rich nodes → compare shows deterministic insights → replay with a model
@@ -396,10 +398,226 @@ recurring LLM cost.
 
 ---
 
+# Milestone 3 — Production Efficiency & Insight (ships as v0.1)
+
+Goal: close the gap between the data the platform already captures and what
+it surfaces — cached (zero-token) replay, thread-level observability,
+per-node cost attribution, global search, failure analytics — then harden
+for the **first public release**. Everything stays deterministic (no LLM
+calls) and additive.
+
+> **Versioning decision:** the tool has never been published, so there is no
+> v0.2 — Milestones 2 and 3 fold into one first release, **`0.1.0`**.
+> Package versions (sdk `__version__`, backend) realign to `0.1.0` in
+> Phase 14. The *semconv document* stays at 0.2.x — attribute-schema
+> versioning is independent of package versioning, and its 0.1→0.2 history
+> is real. No `v0.2.0` tag is ever created (supersedes the Phase 13 release
+> line).
+
+Priorities driving the order (from the v0.2 review): **P1** cached replay ·
+**P2** thread/session view · **P3** per-node cost breakdown · **P4** search
+everywhere · **P5** failure analytics · **P6** production hardening. Phase 14
+comes first because it fixes known defects and the one ingestion hotspot —
+cheap now, expensive after more features stack on top.
+
+## Phase 14 — Correctness & performance debt (pre-feature gate)
+
+Known defects and the ingest hotspot found in the v0.2 review; fix before
+building on top of them.
+
+- [x] **Rollup batching**: replaced the per-node loop with
+      `NodeExecutionRepository.recompute_rollups(execution_id)` — one UPDATE
+      using correlated aggregate subqueries (works on Postgres *and* SQLite,
+      so no dialect branch needed); category CASE mirrors domain
+      `infer_category`. Idempotency + out-of-order tests pass unchanged; dead
+      helpers (`aggregate_by_node`, `node_ids_with_calls`, per-node
+      `update_rollups`) removed
+- [x] **Comparator $0-cost bug**: `_build_input` now derives `cost_known`
+      from child `cost_status` (all priced ⇒ known, incl. genuine $0) and
+      passes `total_cost=None` only when truly unknown; `_delta` fixed so
+      `0 → 0` is 0% (not None). $0 vs $0 compares as 0%
+- [x] **`prompt_changed` upgrade**: `LlmStat.message_sigs` (role:content-hash
+      per message) → deterministic sequence diff; `prompt_first_divergence`
+      reports the first differing message index. Same-length edits detected
+- [x] **Log-capture overflow guard**: `RunContext.log_counts` per span;
+      `LangOpsLogHandler` stops at `max_logs_per_span` (config, default 100)
+      and emits exactly one visible `langops.log` marker (source `sdk`);
+      re-instrument refreshes the handler config
+- [x] **Version realignment**: sdk `__version__` 0.2.0 → `0.1.0` (pyprojects
+      were already 0.1.0; nothing keys behavior off the version string)
+
+**Accept when:** full suites green with no test edits except new cases;
+ingesting a 25-node execution issues exactly one rollup UPDATE (asserted via
+SQLAlchemy `before_cursor_execute` counting); `$0 vs $0` compare shows 0%;
+a chatty node shows a visible truncation marker. ✅ (backend 51 + SDK 21)
+
+## Phase 15 — Cached replay: zero-token debugging (P1)
+
+The highest-ROI item: replay becomes deterministic and free by serving
+recorded tool outputs / LLM responses from the trace instead of re-executing.
+All required data (tool input/output, LLM messages/response per call) is
+already stored — `GET /executions/{id}/tool-calls` and `/llm-calls` exist,
+so this is **SDK + dashboard work only; zero backend changes**.
+
+- [ ] SDK `replay(..., stub_tools=True, stub_llm=False)` + CLI flags
+      (`--stub-tools`, `--stub-llm`): fetch the original execution's
+      tool/LLM calls once, build an in-memory recording
+- [ ] Tool stubbing: a callback-layer interceptor serves recorded output
+      keyed by `(tool_name, canonical-JSON input hash)`; miss policy
+      `on_miss="execute"` (default — input drifted, run it for real) or
+      `"fail"` (strict reproducibility mode); mismatches logged with source
+      `sdk` so they surface in the Logs tab
+- [ ] LLM stubbing: per-node FIFO of recorded responses (calls are replayed
+      in recorded order within each node); response includes the original
+      `usage_metadata` so token accounting reflects "served from cache" —
+      stubbed calls are marked (`langops.llm.stubbed = true`, new semconv
+      attr, additive) and **excluded from cost rollups** (a cached response
+      costs nothing; never double-bill)
+- [ ] Guards: any truncated recorded payload → `ReplayError` up front (a
+      partial cassette must not half-replay); `--stub-llm` combined with
+      `--model` is rejected (contradiction: can't both swap the model and
+      replay its old answers)
+- [ ] Overrides record gains `stubbed: {tools, llm}`; dashboard replay
+      panel + compare view show a "cached replay" badge; LLM inspector marks
+      stubbed calls
+- [ ] Tests: full-stub round trip reproduces the original output with zero
+      tool/LLM invocations (spy-counted); miss policies; truncation guard;
+      stubbed-call cost exclusion; semconv doc + both constant mirrors
+      updated (additive)
+
+**Accept when:** `python -m langops replay <id> --app … --stub-tools
+--stub-llm` on visit-city makes **zero network calls and zero LLM
+invocations**, reproduces the recorded output, and the new execution is
+visibly badged as cached with $0 marginal cost.
+
+## Phase 16 — Thread view & per-node cost breakdown (P2 + P3)
+
+Both are aggregation + presentation over data already captured.
+
+### 16.1 Thread / session view
+- [ ] `GET /api/v1/threads`: executions grouped by `thread_id` — run count,
+      first/last activity, status rollup, total tokens/cost; sorted by
+      recency; paginated (existing `ix_executions_thread_started` index
+      already serves this)
+- [ ] `GET /api/v1/threads/{thread_id}`: ordered executions with per-run
+      duration/tokens/cost, checkpoint lineage (fresh vs resumed chain), and
+      cumulative context-growth series across runs
+- [ ] Dashboard Threads page (sidebar entry) + thread column in the
+      executions list links into it; execution header's thread id becomes a
+      link
+- [ ] Tests: grouping/rollup correctness, resumed-chain ordering,
+      null-thread executions excluded (not grouped as a fake thread)
+
+### 16.2 Per-node cost breakdown
+- [ ] Per-execution: cost-share bar on the execution detail Overview (data
+      is already in `ExecutionDetail.nodes` — frontend only). **Rules:**
+      `cost_status=unknown` nodes are excluded from the base and badged
+      "unknown" (never rendered 0%); when any node is unknown the bar
+      switches to token-share with an explanatory caption; no-LLM nodes
+      render "—", not 0%
+- [ ] Aggregate: `cost_by_node(graph_id, since)` in the cost report service
+      (join `llm_calls → node_executions`, group by `node_name`; unknown
+      calls counted separately) + `by_node` section in `GET /costs/summary`
+- [ ] Costs screen: per-node share bar per graph + per-node cost-over-time
+      (day buckets) — "summary went 40%→56% after Tuesday" is readable
+      straight off the chart
+- [ ] Tests: hand-computed shares match; unknown-cost exclusion; token-share
+      fallback trigger
+
+**Accept when:** visit-city threads page shows Paris/Tokyo as separate
+threads with their runs; the costs screen shows node shares matching
+hand-computed values; a node with an uncataloged model shows "unknown",
+never 0%.
+
+## Phase 17 — Search everywhere (P4)
+
+Postgres is sufficient at this scale (500 → 50k executions); this is one
+extracted column, one index, one endpoint, one ⌘K palette — **not** a search
+cluster.
+
+- [ ] Migration: `llm_calls.text_content` (plain text extracted from
+      messages + response at ingest, size-capped) with a `pg_trgm` GIN index
+      on Postgres (plain `LIKE` fallback on SQLite so the test suite runs);
+      backfill for existing rows in the migration
+- [ ] `GET /api/v1/search?q=&limit=`: typed result groups, each capped and
+      count-annotated — executions (id/trace/thread prefix match), graphs
+      (name), nodes (name), tools (name), logs (message ILIKE), LLM content
+      (`text_content`); one round trip, parallel queries
+- [ ] Dashboard ⌘K command palette (global, every page): grouped results
+      with deep links (execution → detail, log → its execution's Logs tab,
+      LLM hit → LLM inspector); recent-searches memory (local storage)
+- [ ] Executions list gains two facets that cover most debugging sessions:
+      `model` (from llm_calls) and `has_retries`
+- [ ] Tests: extraction at ingest, each result group, empty query = 422,
+      SQLite fallback path, facet filters
+
+**Accept when:** typing a phrase that only appears inside an LLM response
+finds its execution from any page in one search; at 10k executions the query
+stays interactive (indexed; assert query plan uses the GIN index on
+Postgres).
+
+## Phase 18 — Failure analytics (P5)
+
+What on-call debugging actually needs: *"TimeoutError in weather ×12 this
+week"* — a GROUP BY away from data already stored.
+
+- [ ] Migration: extract `error_type` (from the error JSONB's `type`) into
+      an indexed column on `node_executions` and `executions` at ingest;
+      backfill in the migration
+- [ ] `GET /api/v1/errors/summary?since=`: groups by `error_type` ×
+      `node_name` — count, first/last seen, sample execution ids, per-day
+      trend buckets
+- [ ] Dashboard Errors screen: grouped table + trend sparkline per group;
+      click-through → executions list pre-filtered to those failures;
+      Overview page gains a "top failures (7d)" card
+- [ ] Executions list facet: `error_type`
+- [ ] Tests: grouping with injected TimeoutError/ValueError fixtures across
+      nodes, time-window filtering, click-through filter contract
+
+**Accept when:** three injected TimeoutErrors in one node group as a single
+row with count 3 and working drill-down; the overview card shows it.
+
+## Phase 19 — Production hardening & the 0.1.0 release (P6)
+
+The unglamorous work that makes "production-ready" true beyond localhost.
+Subsumes the still-open Phase 8/13 gates (live e2e, load sanity, PyPI).
+
+- [ ] **API-key auth (optional, off by default)**: `LANGOPS_API_KEY` env —
+      when set, `/v1/traces` and `/api/v1/*` require `Authorization: Bearer`
+      (constant-time compare); health stays open; SDK
+      `LangOpsConfig(api_key=…)` sends OTLP exporter headers; Collector
+      config template forwards the header; dashboard uses a server-side
+      route proxy so the key never ships to the browser. Full multi-user
+      auth stays in the backlog — this is single-tenant protection
+- [ ] **Payload lifecycle**: retention on by default in compose
+      (`RETENTION_DAYS`, default 30, `0` = keep forever) via a periodic task
+      in the API lifespan (no cron dependency); plus payload-only pruning
+      mode — null out messages/response/state JSONB older than N days while
+      keeping rollup rows, so metrics history survives payload cleanup
+- [ ] **Load sanity (user-run, scripted)**: extend `scripts/` with a
+      100-concurrent-execution generator; document measured ingest
+      latency/throughput and the rollup-batching win from Phase 14 in
+      `docs/backend.md`
+- [ ] **Live `make e2e`** on a Docker host — extended to cover: cached
+      replay (zero-token), thread view, cost-by-node, search, errors screen
+- [ ] Docs sweep (backend.md, dashboard.md, database.md schema, setup.md
+      auth section) + one consolidated `CHANGELOG.md` for 0.1.0
+- [ ] Tag `v0.1.0`; publish `langops` 0.1.0 to PyPI (release steps for the
+      user)
+
+**Accept when:** clean-machine quickstart < 10 min; with `LANGOPS_API_KEY`
+set, unauthenticated ingest/query return 401 and the instrumented example
+still works end-to-end; retention prunes on schedule; load numbers are
+documented; `v0.1.0` is tagged and published.
+
+---
+
 ## Post-MVP backlog (architecture §10 — do not start before 0.1.0)
 
-Prompt versioning · agent evaluation · **replay R3/R4** (from checkpoint /
-from arbitrary node — requires checkpoint state rehydration; R1/R2 land in
-v0.2 Phase 12) · human-in-the-loop · multi-project · auth/users · Kubernetes
-deployment · partitioned/scale-out storage. Each maps to an existing seam;
-keep it that way — new features must be additive.
+Prompt versioning · agent evaluation (batch replay + comparator as the
+seam) · **replay R3/R4** (from checkpoint / from arbitrary node — requires
+checkpoint state rehydration; R1/R2 landed in Phase 12, cached replay in
+Phase 15) · human-in-the-loop · multi-project · **multi-user auth/SSO**
+(single API key lands in Phase 19) · Kubernetes deployment ·
+partitioned/scale-out storage. Each maps to an existing seam; keep it that
+way — new features must be additive.

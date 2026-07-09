@@ -31,6 +31,10 @@ class LangOpsConfig:
     # Opt-in: bridge stdlib `logging` records into the trace as langops.log
     # events on the active node/execution span (off by default — zero cost).
     capture_logs: bool = False
+    # Cap on log events recorded per span before a single truncation marker is
+    # emitted (kept under OTel's default 128-event-per-span limit so captured
+    # logs are never *silently* dropped).
+    max_logs_per_span: int = 100
 
     # Limits & privacy
     max_payload_bytes: int = 65_536

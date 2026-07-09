@@ -507,6 +507,7 @@ class LlmChangesResponse(BaseModel):
     models_b: list[str]
     temperature_changed: bool
     prompt_changed: bool
+    prompt_first_divergence: int | None
     prompt_chars: MetricDeltaResponse
     response_chars: MetricDeltaResponse
     tool_calls: MetricDeltaResponse
@@ -555,6 +556,7 @@ class ExecutionComparisonResponse(BaseModel):
                     models_b=result.llm_changes.models_b,
                     temperature_changed=result.llm_changes.temperature_changed,
                     prompt_changed=result.llm_changes.prompt_changed,
+                    prompt_first_divergence=result.llm_changes.prompt_first_divergence,
                     prompt_chars=MetricDeltaResponse(**result.llm_changes.prompt_chars.__dict__),
                     response_chars=MetricDeltaResponse(
                         **result.llm_changes.response_chars.__dict__

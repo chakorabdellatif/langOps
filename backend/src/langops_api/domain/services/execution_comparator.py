@@ -29,6 +29,9 @@ class LlmStat:
     temperature: float | None
     prompt_chars: int
     response_chars: int
+    # Per-message signatures (role:content-hash) for a real prompt diff, not a
+    # char-count heuristic — same-length edits are still detected.
+    message_sigs: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -82,6 +85,9 @@ class LlmChanges:
     models_b: list[str]
     temperature_changed: bool
     prompt_changed: bool
+    # 0-based index of the first message that differs between the two runs'
+    # prompt sequences, or None when the prompts are identical.
+    prompt_first_divergence: int | None
     prompt_chars: MetricDelta
     response_chars: MetricDelta
     tool_calls: MetricDelta
@@ -117,12 +123,27 @@ def _delta(a: float | None, b: float | None) -> MetricDelta:
     if a is None or b is None:
         return MetricDelta(a=a, b=b, delta=None, delta_pct=None, comparable=False)
     delta = b - a
-    pct = (delta / a * 100.0) if a != 0 else None
+    if a != 0:
+        pct: float | None = delta / a * 100.0
+    else:
+        # 0 → 0 is "no change" (0%); 0 → non-zero has no finite percentage.
+        pct = 0.0 if b == 0 else None
     return MetricDelta(a=a, b=b, delta=delta, delta_pct=pct, comparable=True)
 
 
 def _f(value: float | int | Decimal | None) -> float | None:
     return None if value is None else float(value)
+
+
+def _first_divergence(a: list[str], b: list[str]) -> int | None:
+    """Index of the first differing element between two sequences, or None if
+    one is a prefix of the other and they are equal (identical prompts)."""
+    for i, (x, y) in enumerate(zip(a, b, strict=False)):
+        if x != y:
+            return i
+    if len(a) != len(b):
+        return min(len(a), len(b))
+    return None
 
 
 class ExecutionComparator:
@@ -182,12 +203,18 @@ class ExecutionComparator:
         prompt_b = sum(c.prompt_chars for c in b.llm_calls)
         resp_a = sum(c.response_chars for c in a.llm_calls)
         resp_b = sum(c.response_chars for c in b.llm_calls)
+        # Message-level prompt diff (deterministic): compare the full ordered
+        # sequence of message signatures across all calls.
+        sigs_a = [sig for c in a.llm_calls for sig in c.message_sigs]
+        sigs_b = [sig for c in b.llm_calls for sig in c.message_sigs]
+        first_divergence = _first_divergence(sigs_a, sigs_b)
         return LlmChanges(
             model_changed=models_a != models_b,
             models_a=models_a,
             models_b=models_b,
             temperature_changed=temps_a != temps_b,
-            prompt_changed=prompt_a != prompt_b,
+            prompt_changed=sigs_a != sigs_b,
+            prompt_first_divergence=first_divergence,
             prompt_chars=_delta(float(prompt_a), float(prompt_b)),
             response_chars=_delta(float(resp_a), float(resp_b)),
             tool_calls=_delta(float(a.tool_call_count), float(b.tool_call_count)),

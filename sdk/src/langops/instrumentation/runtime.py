@@ -27,6 +27,8 @@ class RunContext:
     # Stack of currently-executing node spans (for attributing log records to
     # the node that emitted them); empty → logs attach to the execution root.
     node_spans: list[Span] = field(default_factory=list)
+    # Per-span log-event counts (keyed by id(span)) for the truncation guard.
+    log_counts: dict[int, int] = field(default_factory=dict)
 
     @property
     def target_span(self) -> Span:

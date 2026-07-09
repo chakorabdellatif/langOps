@@ -39,6 +39,31 @@ class LangOpsLogHandler(logging.Handler):
             run = current_run.get()
             if run is None:
                 return  # no active execution — nothing to attach to
+            span = run.target_span
+            limit = self._config.max_logs_per_span
+            count = run.log_counts.get(id(span), 0)
+            if count >= limit:
+                # Emit exactly one visible marker, then stop — truncation is
+                # never silent (OTel would otherwise drop events past its cap).
+                if count == limit:
+                    run.log_counts[id(span)] = count + 1
+                    add_payload_event(
+                        span,
+                        semconv.EVENT_LOG,
+                        {
+                            "message": f"log capture hit the per-span cap of {limit}; "
+                            "further logs on this span were dropped"
+                        },
+                        self._config,
+                        extra_attributes={
+                            semconv.LOG_LEVEL: "warning",
+                            semconv.LOG_LOGGER: "langops",
+                            semconv.LOG_SOURCE: semconv.LogSource.SDK,
+                        },
+                    )
+                return
+            run.log_counts[id(span)] = count + 1
+
             level = _LEVEL_TO_NAME.get(record.levelno, record.levelname.lower())
             source = (
                 semconv.LogSource.SDK
@@ -48,7 +73,7 @@ class LangOpsLogHandler(logging.Handler):
             # One event carrying both the log metadata and the (redacted,
             # size-capped) message payload.
             add_payload_event(
-                run.target_span,
+                span,
                 semconv.EVENT_LOG,
                 {"message": record.getMessage()},
                 self._config,
@@ -66,9 +91,11 @@ _installed: LangOpsLogHandler | None = None
 
 
 def install_log_capture(config: LangOpsConfig) -> None:
-    """Attach the log handler to the root logger once (idempotent)."""
+    """Attach the log handler to the root logger once; a later re-instrument
+    refreshes the config so the most recent settings win."""
     global _installed
     if _installed is not None:
+        _installed._config = config
         return
     handler = LangOpsLogHandler(config)
     handler.setLevel(logging.DEBUG)
