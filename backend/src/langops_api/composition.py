@@ -26,6 +26,7 @@ from langops_api.application.services.queries import (
 from langops_api.application.services.reports import (
     CompareExecutionsService,
     GetCostReportService,
+    GetErrorReportService,
     GetMetricsService,
     GetStateEvolutionService,
     GetThreadDetailService,
@@ -39,6 +40,7 @@ from langops_api.infrastructure.cache import (
     RedisEventPublisher,
 )
 from langops_api.infrastructure.db.repositories import (
+    PostgresErrorRepository,
     PostgresExecutionRepository,
     PostgresGraphRepository,
     PostgresLlmCallRepository,
@@ -213,6 +215,15 @@ def get_cost_report_service(
     return GetCostReportService(
         projects=PostgresProjectRepository(session),
         llm_calls=PostgresLlmCallRepository(session),
+    )
+
+
+def get_error_report_service(
+    session: AsyncSession = Depends(get_session),
+) -> GetErrorReportService:
+    return GetErrorReportService(
+        projects=PostgresProjectRepository(session),
+        errors=PostgresErrorRepository(session),
     )
 
 

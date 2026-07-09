@@ -250,6 +250,21 @@ export interface CostSummary {
   by_node: CostByNode[];
 }
 
+export interface ErrorGroup {
+  error_type: string;
+  node_name: string;
+  count: number;
+  first_seen: string | null;
+  last_seen: string | null;
+  sample_execution_id: string;
+}
+
+export interface ErrorReport {
+  total: number;
+  groups: ErrorGroup[];
+  trend: { day: string; count: number }[];
+}
+
 export interface SearchHit {
   kind: string;
   label: string;

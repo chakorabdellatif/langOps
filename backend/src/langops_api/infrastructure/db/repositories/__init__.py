@@ -71,6 +71,7 @@ def _execution_to_entity(row: ExecutionModel) -> Execution:
         tokens=TokenUsage(row.total_input_tokens, row.total_output_tokens),
         total_cost=Decimal(row.total_cost or 0),
         sdk_version=row.sdk_version,
+        error_type=row.error_type,
         replay_of_execution_id=row.replay_of_execution_id,
         replay_overrides=row.replay_overrides,
     )
@@ -96,6 +97,7 @@ def _node_to_entity(row: NodeExecutionModel) -> NodeExecution:
             total_cost=Decimal(row.total_cost) if row.total_cost is not None else None,
             status=CostStatus(row.cost_status),
         ),
+        error_type=row.error_type,
     )
 
 
@@ -345,6 +347,7 @@ class PostgresExecutionRepository:
             row.resumed = cp.resumed or row.resumed
             row.status = execution.status.value
             row.error = execution.error if execution.error is not None else row.error
+            row.error_type = execution.error_type or row.error_type
             row.input = execution.input if execution.input is not None else row.input
             row.output = execution.output if execution.output is not None else row.output
             row.started_at = execution.started_at or row.started_at
@@ -454,6 +457,7 @@ class PostgresExecutionRepository:
         thread_id: str | None = None,
         model: str | None = None,
         has_retries: bool | None = None,
+        error_type: str | None = None,
         since: datetime | None = None,
         until: datetime | None = None,
         page: int = 1,
@@ -466,6 +470,8 @@ class PostgresExecutionRepository:
             query = query.where(ExecutionModel.graph_id == graph_id)
         if thread_id:
             query = query.where(ExecutionModel.thread_id == thread_id)
+        if error_type:
+            query = query.where(ExecutionModel.error_type == error_type)
         if model:
             query = query.where(
                 sa.exists().where(
@@ -512,6 +518,7 @@ class PostgresNodeExecutionRepository:
         row.status = node.status.value
         row.retry_count = node.retry_count
         row.error = node.error if node.error is not None else row.error
+        row.error_type = node.error_type or row.error_type
         row.started_at = node.started_at or row.started_at
         row.ended_at = node.ended_at or row.ended_at
         row.duration_ms = node.duration_ms if node.duration_ms is not None else row.duration_ms
@@ -902,6 +909,63 @@ class PostgresLogRepository:
             query.order_by(LogModel.timestamp.desc().nulls_last()).offset(offset).limit(limit)
         )
         return [_log_to_entity(r) for r in rows], int(total or 0)
+
+
+class PostgresErrorRepository:
+    """Failure analytics — group node failures by (error_type, node) and a
+    daily trend, both scoped to a project and an optional time window."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def summary(
+        self, project_id: UUID, since: datetime | None = None
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        base = (
+            sa.select(NodeExecutionModel)
+            .join(ExecutionModel, ExecutionModel.id == NodeExecutionModel.execution_id)
+            .where(
+                ExecutionModel.project_id == project_id,
+                NodeExecutionModel.error_type.is_not(None),
+            )
+        )
+        if since is not None:
+            base = base.where(NodeExecutionModel.started_at >= since)
+        sub = base.subquery()
+
+        grouped = await self._session.execute(
+            sa.select(
+                sub.c.error_type,
+                sub.c.node_name,
+                sa.func.count().label("cnt"),
+                sa.func.min(sub.c.started_at).label("first_seen"),
+                sa.func.max(sub.c.started_at).label("last_seen"),
+                sa.func.min(sub.c.execution_id).label("sample_execution_id"),
+            )
+            .group_by(sub.c.error_type, sub.c.node_name)
+            .order_by(sa.func.count().desc())
+        )
+        groups = [
+            {
+                "error_type": r.error_type,
+                "node_name": r.node_name,
+                "count": int(r.cnt),
+                "first_seen": r.first_seen,
+                "last_seen": r.last_seen,
+                "sample_execution_id": str(r.sample_execution_id),
+            }
+            for r in grouped.all()
+        ]
+
+        day = sa.func.date(sub.c.started_at)
+        trend_rows = await self._session.execute(
+            sa.select(day, sa.func.count())
+            .where(sub.c.started_at.is_not(None))
+            .group_by(day)
+            .order_by(day)
+        )
+        trend = [{"day": str(d), "count": int(c)} for d, c in trend_rows.all()]
+        return groups, trend
 
 
 class PostgresSearchRepository:

@@ -13,6 +13,7 @@ from uuid import UUID
 from pydantic import BaseModel
 
 from langops_api.application.dto import (
+    ErrorReport,
     ExecutionComparison,
     ExecutionDetail,
     ExecutionPage,
@@ -465,6 +466,29 @@ class CostSummaryResponse(BaseModel):
     by_model: list[dict[str, Any]]
     by_day: list[dict[str, Any]]
     by_node: list[dict[str, Any]]
+
+
+class ErrorGroupResponse(BaseModel):
+    error_type: str
+    node_name: str
+    count: int
+    first_seen: datetime | None
+    last_seen: datetime | None
+    sample_execution_id: str
+
+
+class ErrorReportResponse(BaseModel):
+    total: int
+    groups: list[ErrorGroupResponse]
+    trend: list[dict[str, Any]]
+
+    @classmethod
+    def from_dto(cls, report: ErrorReport) -> ErrorReportResponse:
+        return cls(
+            total=report.total,
+            groups=[ErrorGroupResponse(**g.__dict__) for g in report.groups],
+            trend=report.trend,
+        )
 
 
 class SearchHitResponse(BaseModel):

@@ -96,6 +96,23 @@ class ThreadDetail:
 
 
 @dataclass
+class ErrorGroup:
+    error_type: str
+    node_name: str
+    count: int
+    first_seen: datetime | None
+    last_seen: datetime | None
+    sample_execution_id: str
+
+
+@dataclass
+class ErrorReport:
+    total: int
+    groups: list[ErrorGroup]
+    trend: list[dict[str, object]]  # [{day, count}]
+
+
+@dataclass
 class SearchHit:
     kind: str  # execution | graph | node | tool | log | llm
     label: str

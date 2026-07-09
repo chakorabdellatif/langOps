@@ -82,6 +82,10 @@ def _error(span: ParsedSpan) -> dict[str, Any] | None:
     return None
 
 
+def _error_type(error: dict[str, Any] | None) -> str | None:
+    return error.get("type") if error else None
+
+
 def _payload(event: ParsedEvent) -> Any:
     raw = event.attributes.get(semconv.PAYLOAD)
     if isinstance(raw, str):
@@ -142,6 +146,7 @@ def _map_execution(trace: MappedTrace, span: ParsedSpan) -> None:
     execution = trace.execution
     execution.status = _status(span) if span.end_ns else ExecutionStatus.RUNNING
     execution.error = _error(span)
+    execution.error_type = _error_type(execution.error)
     execution.input = _event_payload(span, semconv.EVENT_EXECUTION_INPUT)
     execution.output = _event_payload(span, semconv.EVENT_EXECUTION_OUTPUT)
     execution.started_at = _ts(span.start_ns)
@@ -186,6 +191,7 @@ def _map_node(trace: MappedTrace, span: ParsedSpan) -> None:
         status=_status(span),
         retry_count=int(span.attributes.get(semconv.NODE_RETRY_COUNT, 0)),
         error=_error(span),
+        error_type=_error_type(_error(span)),
         started_at=_ts(span.start_ns),
         ended_at=_ts(span.end_ns),
         duration_ms=_duration_ms(span),
