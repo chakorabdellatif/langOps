@@ -21,8 +21,9 @@ export function ReplayPanel({ detail }: { detail: ExecutionDetail }) {
     <Card title="Replay">
       <p className="mb-2 text-xs text-neutral-500">
         Re-run this execution locally with the SDK. Add <code>--model</code>,{" "}
-        <code>--temperature</code>, or <code>--input file.json</code> to experiment. The dashboard
-        cannot run your code, so copy the command below.
+        <code>--temperature</code>, or <code>--input file.json</code> to experiment, or{" "}
+        <code>--stub-llm</code> for a deterministic, zero-token replay from the recording. The
+        dashboard cannot run your code, so copy the command below.
       </p>
       <CopyBlock text={command} />
 
@@ -35,6 +36,7 @@ export function ReplayPanel({ detail }: { detail: ExecutionDetail }) {
           >
             {detail.replay_of_execution_id.slice(0, 12)}
           </Link>
+          {isCached(detail.replay_overrides) && <CachedBadge />}
           <Link
             href={`/compare?a=${detail.replay_of_execution_id}&b=${id}`}
             className="ml-3 text-xs text-sky-400 hover:underline"
@@ -74,6 +76,22 @@ export function ReplayPanel({ detail }: { detail: ExecutionDetail }) {
         </div>
       )}
     </Card>
+  );
+}
+
+function isCached(overrides: Record<string, unknown> | null): boolean {
+  const stubbed = overrides?.stubbed as { llm?: boolean; tools?: string[] } | undefined;
+  return Boolean(stubbed && (stubbed.llm || (stubbed.tools?.length ?? 0) > 0));
+}
+
+function CachedBadge() {
+  return (
+    <span
+      className="ml-2 rounded bg-violet-500/15 px-2 py-0.5 text-xs text-violet-300 ring-1 ring-violet-500/30"
+      title="Cached replay — LLM/tool outputs served from the recording (zero tokens)"
+    >
+      cached
+    </span>
   );
 }
 

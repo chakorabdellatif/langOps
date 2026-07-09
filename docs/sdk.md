@@ -122,6 +122,35 @@ import langops
 langops.replay(graph, "<execution-id>", model="gpt-5")
 ```
 
+#### Cached replay (deterministic, zero-token)
+
+Debug graph logic without paying for inference or hitting external tools:
+recorded LLM/tool outputs are served from the trace.
+
+```bash
+# serve recorded LLM responses (no model call)
+python -m langops replay <id> --app your_module:graph --stub-llm
+
+# also stub specific tools (pass the tool objects)
+python -m langops replay <id> --app your_module:graph --stub-llm \
+    --stub-tool your_module:get_weather --on-miss fail
+```
+
+- **LLM stubbing is generic** — it uses LangChain's global cache to replay
+  recorded generations in order, so it works for any chat model without
+  touching your graph. Stubbed calls are marked (`langops.llm.stubbed`) and
+  **excluded from cost** (a cached response costs nothing); the recorded token
+  counts are still shown.
+- **Tool stubbing is explicit** — pass the tool objects to wrap
+  (`stub_tools=[...]` / `--stub-tool module:attr`); there is no global tool
+  cache, and tools called inside node functions can't be discovered from a
+  compiled graph.
+- `--on-miss fail` aborts if the run diverges from the recording (strict
+  reproducibility); the default `execute` runs the missing call for real.
+- `--stub-llm` cannot be combined with `--model` (replaying the old model's
+  answers contradicts swapping the model); a truncated recorded response
+  cannot be stubbed.
+
 **What replay is — and isn't.** Replay fetches the recorded input/config from
 the API and re-invokes your *local* graph, so it runs in your environment:
 external APIs and tools re-execute for real, and results need not match the

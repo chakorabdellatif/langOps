@@ -61,6 +61,9 @@ GEN_AI_RESPONSE_MODEL = "gen_ai.response.model"
 GEN_AI_USAGE_INPUT_TOKENS = "gen_ai.usage.input_tokens"
 GEN_AI_USAGE_OUTPUT_TOKENS = "gen_ai.usage.output_tokens"
 
+LLM_STUBBED = "langops.llm.stubbed"
+TOOL_STUBBED = "langops.tool.stubbed"
+
 EVENT_LLM_MESSAGES = "langops.llm.messages"
 EVENT_LLM_PARAMS = "langops.llm.params"
 EVENT_LLM_RESPONSE = "langops.llm.response"

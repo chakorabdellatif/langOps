@@ -132,6 +132,7 @@ LangOps-specific:
 | Attribute | Type | Description |
 |---|---|---|
 | `langops.execution.id` | string | Correlation |
+| `langops.llm.stubbed` | bool? | Response served from a recording during cached replay — the call cost nothing and is excluded from cost rollups |
 
 Span events:
 

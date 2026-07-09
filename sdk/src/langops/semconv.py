@@ -72,6 +72,11 @@ GEN_AI_REQUEST_MAX_TOKENS = "gen_ai.request.max_tokens"
 GEN_AI_USAGE_INPUT_TOKENS = "gen_ai.usage.input_tokens"
 GEN_AI_USAGE_OUTPUT_TOKENS = "gen_ai.usage.output_tokens"
 
+# Set on a replayed LLM/tool span whose result was served from the recorded
+# execution (cached replay) — no real call was made, so it costs nothing.
+LLM_STUBBED = "langops.llm.stubbed"
+TOOL_STUBBED = "langops.tool.stubbed"
+
 # LLM span events
 EVENT_LLM_MESSAGES = "langops.llm.messages"
 EVENT_LLM_PARAMS = "langops.llm.params"

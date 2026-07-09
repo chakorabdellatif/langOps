@@ -113,6 +113,7 @@ export interface LlmCall {
   latency_ms: number | null;
   started_at: string | null;
   error: Record<string, unknown> | null;
+  stubbed: boolean;
 }
 
 export interface ToolCall {

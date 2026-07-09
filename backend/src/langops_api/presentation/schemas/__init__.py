@@ -256,6 +256,7 @@ class LlmCallResponse(BaseModel):
     latency_ms: int | None
     started_at: datetime | None
     error: dict[str, Any] | None
+    stubbed: bool
 
     @classmethod
     def from_entity(cls, call: LlmCall) -> LlmCallResponse:
@@ -278,6 +279,7 @@ class LlmCallResponse(BaseModel):
             latency_ms=call.latency_ms,
             started_at=call.started_at,
             error=call.error,
+            stubbed=call.stubbed,
         )
 
 

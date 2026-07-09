@@ -120,6 +120,7 @@ def _llm_to_entity(row: LlmCallModel) -> LlmCall:
         latency_ms=row.latency_ms,
         started_at=row.started_at,
         error=row.error,
+        stubbed=row.stubbed,
     )
 
 
@@ -557,6 +558,7 @@ class PostgresLlmCallRepository:
         row.latency_ms = call.latency_ms if call.latency_ms is not None else row.latency_ms
         row.started_at = call.started_at or row.started_at
         row.error = call.error if call.error is not None else row.error
+        row.stubbed = call.stubbed
         await self._session.flush()
         return _llm_to_entity(row)
 

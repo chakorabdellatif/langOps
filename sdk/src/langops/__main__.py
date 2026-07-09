@@ -34,6 +34,7 @@ def _run_replay(args: argparse.Namespace) -> int:
     if args.input:
         with open(args.input, encoding="utf-8") as fh:
             override_input = json.load(fh)
+    stub_tools = [_load_graph(spec) for spec in (args.stub_tool or [])]
     try:
         result = replay(
             graph,
@@ -43,6 +44,9 @@ def _run_replay(args: argparse.Namespace) -> int:
             model=args.model,
             temperature=args.temperature,
             same_thread=args.same_thread,
+            stub_llm=args.stub_llm,
+            stub_tools=stub_tools or None,
+            on_miss=args.on_miss,
         )
     except ReplayError as exc:
         print(f"replay failed: {exc}", file=sys.stderr)
@@ -64,6 +68,23 @@ def main(argv: list[str] | None = None) -> int:
     rp.add_argument("--model", help="override model id (recorded + passed via configurable)")
     rp.add_argument("--temperature", type=float, help="override temperature")
     rp.add_argument("--same-thread", action="store_true", help="reuse the recorded thread id")
+    rp.add_argument(
+        "--stub-llm",
+        action="store_true",
+        help="serve recorded LLM responses (deterministic, zero-token)",
+    )
+    rp.add_argument(
+        "--stub-tool",
+        action="append",
+        metavar="module:attr",
+        help="serve recorded output for this tool object (repeatable)",
+    )
+    rp.add_argument(
+        "--on-miss",
+        choices=("execute", "fail"),
+        default="execute",
+        help="on a recording miss: run for real (default) or fail",
+    )
     rp.set_defaults(func=_run_replay)
 
     args = parser.parse_args(argv)
