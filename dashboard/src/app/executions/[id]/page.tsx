@@ -7,6 +7,7 @@ import { useParams } from "next/navigation";
 import { Card, Cost, Duration, EmptyState, JsonViewer, StatusBadge, Tokens } from "@/components/data";
 import { GraphView } from "@/features/graph/graph-view";
 import { NodeInspector } from "@/features/graph/node-inspector";
+import { NodeCostBreakdown } from "@/features/costs/node-cost-breakdown";
 import { ReplayPanel } from "@/features/replay/replay-panel";
 import { StateView } from "@/features/state/state-view";
 import { TimelineView } from "@/features/timeline/timeline-view";
@@ -61,7 +62,18 @@ export default function ExecutionDetailPage() {
           <Meta label="Cost">
             <Cost usd={ex.total_cost} />
           </Meta>
-          <Meta label="Thread">{ex.thread_id ?? "—"}</Meta>
+          <Meta label="Thread">
+            {ex.thread_id ? (
+              <Link
+                href={`/threads/${encodeURIComponent(ex.thread_id)}`}
+                className="text-sky-400 hover:underline"
+              >
+                {ex.thread_id}
+              </Link>
+            ) : (
+              "—"
+            )}
+          </Meta>
         </div>
       </div>
 
@@ -96,6 +108,9 @@ export default function ExecutionDetailPage() {
               </Card>
             </div>
           )}
+          <div className="md:col-span-2">
+            <NodeCostBreakdown nodes={data.nodes} />
+          </div>
           <div className="md:col-span-2">
             <ReplayPanel detail={data} />
           </div>

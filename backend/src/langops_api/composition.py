@@ -27,7 +27,9 @@ from langops_api.application.services.reports import (
     GetCostReportService,
     GetMetricsService,
     GetStateEvolutionService,
+    GetThreadDetailService,
     ListGraphsService,
+    ListThreadsService,
 )
 from langops_api.domain.services import CostCalculator, ExecutionComparator, StateDiffer
 from langops_api.infrastructure.cache import (
@@ -209,6 +211,24 @@ def get_cost_report_service(
     return GetCostReportService(
         projects=PostgresProjectRepository(session),
         llm_calls=PostgresLlmCallRepository(session),
+    )
+
+
+def get_list_threads_service(
+    session: AsyncSession = Depends(get_session),
+) -> ListThreadsService:
+    return ListThreadsService(
+        projects=PostgresProjectRepository(session),
+        executions=PostgresExecutionRepository(session),
+    )
+
+
+def get_thread_detail_service(
+    session: AsyncSession = Depends(get_session),
+) -> GetThreadDetailService:
+    return GetThreadDetailService(
+        projects=PostgresProjectRepository(session),
+        executions=PostgresExecutionRepository(session),
     )
 
 

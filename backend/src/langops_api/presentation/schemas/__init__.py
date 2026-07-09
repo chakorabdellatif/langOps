@@ -21,6 +21,9 @@ from langops_api.application.dto import (
     NodeDetail,
     NodeView,
     StateEvolution,
+    ThreadDetail,
+    ThreadPage,
+    ThreadSummary,
     TimelineEntry,
 )
 from langops_api.domain.entities import (
@@ -460,6 +463,64 @@ class CostSummaryResponse(BaseModel):
     total_tokens: int
     by_model: list[dict[str, Any]]
     by_day: list[dict[str, Any]]
+    by_node: list[dict[str, Any]]
+
+
+class ThreadSummaryResponse(BaseModel):
+    thread_id: str
+    run_count: int
+    first_at: datetime | None
+    last_at: datetime | None
+    total_tokens: int
+    total_cost: float
+    succeeded: int
+    failed: int
+    running: int
+
+    @classmethod
+    def from_dto(cls, thread: ThreadSummary) -> ThreadSummaryResponse:
+        return cls(**thread.__dict__)
+
+
+class ThreadListResponse(BaseModel):
+    items: list[ThreadSummaryResponse]
+    total: int
+    page: int
+    page_size: int
+
+    @classmethod
+    def from_dto(cls, page: ThreadPage) -> ThreadListResponse:
+        return cls(
+            items=[ThreadSummaryResponse.from_dto(t) for t in page.items],
+            total=page.total,
+            page=page.page,
+            page_size=page.page_size,
+        )
+
+
+class ThreadRunResponse(BaseModel):
+    execution: ExecutionSummaryResponse
+    cumulative_tokens: int
+    cumulative_cost: float
+
+
+class ThreadDetailResponse(BaseModel):
+    thread_id: str
+    runs: list[ThreadRunResponse]
+
+    @classmethod
+    def from_dto(cls, detail: ThreadDetail) -> ThreadDetailResponse:
+        return cls(
+            thread_id=detail.thread_id,
+            runs=[
+                ThreadRunResponse(
+                    execution=ExecutionSummaryResponse.from_entity(run.execution),
+                    cumulative_tokens=run.cumulative_tokens,
+                    cumulative_cost=run.cumulative_cost,
+                )
+                for run in detail.runs
+            ],
+        )
 
 
 class MetricsOverviewResponse(BaseModel):

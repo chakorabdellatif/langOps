@@ -233,11 +233,51 @@ export interface CostByModel {
   unknown_calls: number;
 }
 
+export interface CostByNode {
+  node_name: string;
+  input_tokens: number;
+  output_tokens: number;
+  total_cost: number;
+  calls: number;
+  unknown_calls: number;
+}
+
 export interface CostSummary {
   total_cost: number;
   total_tokens: number;
   by_model: CostByModel[];
   by_day: { day: string; total_cost: number }[];
+  by_node: CostByNode[];
+}
+
+export interface ThreadSummary {
+  thread_id: string;
+  run_count: number;
+  first_at: string | null;
+  last_at: string | null;
+  total_tokens: number;
+  total_cost: number;
+  succeeded: number;
+  failed: number;
+  running: number;
+}
+
+export interface ThreadList {
+  items: ThreadSummary[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+export interface ThreadRun {
+  execution: ExecutionSummary;
+  cumulative_tokens: number;
+  cumulative_cost: number;
+}
+
+export interface ThreadDetail {
+  thread_id: string;
+  runs: ThreadRun[];
 }
 
 export interface MetricsOverview {

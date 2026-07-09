@@ -24,6 +24,10 @@ class NodeExecutionNotFound(NotFoundError):
     code = "node_execution_not_found"
 
 
+class ThreadNotFound(NotFoundError):
+    code = "thread_not_found"
+
+
 class InvalidTelemetry(LangOpsError):
     """Malformed OTLP payload — maps to HTTP 400, never 500."""
 

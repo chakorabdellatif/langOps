@@ -15,10 +15,14 @@ from langops_api.application.dto import (
     MetricsOverview,
     StateEvolution,
     StateStep,
+    ThreadDetail,
+    ThreadPage,
+    ThreadRun,
+    ThreadSummary,
 )
 from langops_api.application.services.queries import GetExecutionDetailService
 from langops_api.domain.entities import Graph
-from langops_api.domain.errors import ExecutionNotFound
+from langops_api.domain.errors import ExecutionNotFound, ThreadNotFound
 from langops_api.domain.repositories import (
     ExecutionRepository,
     GraphRepository,
@@ -84,10 +88,11 @@ class GetCostReportService:
         self._projects = projects
         self._llm_calls = llm_calls
 
-    async def summary(self) -> dict[str, Any]:
+    async def summary(self, graph_id: UUID | None = None) -> dict[str, Any]:
         project = await self._projects.get_or_create_default()
         by_model = await self._llm_calls.cost_by_model(project.id)
         by_day = await self._llm_calls.cost_by_day(project.id)
+        by_node = await self._llm_calls.cost_by_node(project.id, graph_id)
         total_cost = sum(row["total_cost"] for row in by_model)
         total_tokens = sum(row["input_tokens"] + row["output_tokens"] for row in by_model)
         return {
@@ -95,7 +100,54 @@ class GetCostReportService:
             "total_tokens": total_tokens,
             "by_model": by_model,
             "by_day": by_day,
+            "by_node": by_node,
         }
+
+
+class ListThreadsService:
+    def __init__(self, projects: ProjectRepository, executions: ExecutionRepository) -> None:
+        self._projects = projects
+        self._executions = executions
+
+    async def list(self, *, page: int = 1, page_size: int = 20) -> ThreadPage:
+        page = max(1, page)
+        page_size = min(max(1, page_size), 100)
+        project = await self._projects.get_or_create_default()
+        items, total = await self._executions.list_threads(
+            project.id, page=page, page_size=page_size
+        )
+        return ThreadPage(
+            items=[ThreadSummary(**item) for item in items],
+            total=total,
+            page=page,
+            page_size=page_size,
+        )
+
+
+class GetThreadDetailService:
+    def __init__(self, projects: ProjectRepository, executions: ExecutionRepository) -> None:
+        self._projects = projects
+        self._executions = executions
+
+    async def get(self, thread_id: str) -> ThreadDetail:
+        project = await self._projects.get_or_create_default()
+        executions = await self._executions.list_by_thread(project.id, thread_id)
+        if not executions:
+            raise ThreadNotFound(f"Thread {thread_id} not found")
+        runs: list[ThreadRun] = []
+        cumulative_tokens = 0
+        cumulative_cost = 0.0
+        for execution in executions:
+            cumulative_tokens += execution.tokens.total_tokens
+            cumulative_cost += float(execution.total_cost)
+            runs.append(
+                ThreadRun(
+                    execution=execution,
+                    cumulative_tokens=cumulative_tokens,
+                    cumulative_cost=cumulative_cost,
+                )
+            )
+        return ThreadDetail(thread_id=thread_id, runs=runs)
 
 
 class GetMetricsService:

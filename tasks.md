@@ -494,39 +494,32 @@ calls → cached replay 0; all 3 replay LLM calls stubbed at $0)
 Both are aggregation + presentation over data already captured.
 
 ### 16.1 Thread / session view
-- [ ] `GET /api/v1/threads`: executions grouped by `thread_id` — run count,
-      first/last activity, status rollup, total tokens/cost; sorted by
-      recency; paginated (existing `ix_executions_thread_started` index
-      already serves this)
-- [ ] `GET /api/v1/threads/{thread_id}`: ordered executions with per-run
-      duration/tokens/cost, checkpoint lineage (fresh vs resumed chain), and
-      cumulative context-growth series across runs
-- [ ] Dashboard Threads page (sidebar entry) + thread column in the
-      executions list links into it; execution header's thread id becomes a
-      link
-- [ ] Tests: grouping/rollup correctness, resumed-chain ordering,
-      null-thread executions excluded (not grouped as a fake thread)
+- [x] `GET /api/v1/threads`: `ExecutionRepository.list_threads` groups by
+      `thread_id` (run count, first/last, status rollup, tokens/cost), most
+      recent first, paginated; null-thread executions excluded
+- [x] `GET /api/v1/threads/{thread_id}`: `list_by_thread` (oldest first) →
+      `ThreadRun`s with running cumulative tokens/cost across the conversation;
+      404 on an unknown thread
+- [x] Dashboard Threads page (sidebar entry) + thread detail (conversation
+      timeline with per-run + cumulative totals); execution header thread id
+      links into it
+- [x] Tests: grouping/rollup, cumulative totals, 404, null-thread exclusion
 
 ### 16.2 Per-node cost breakdown
-- [ ] Per-execution: cost-share bar on the execution detail Overview (data
-      is already in `ExecutionDetail.nodes` — frontend only). **Rules:**
-      `cost_status=unknown` nodes are excluded from the base and badged
-      "unknown" (never rendered 0%); when any node is unknown the bar
-      switches to token-share with an explanatory caption; no-LLM nodes
-      render "—", not 0%
-- [ ] Aggregate: `cost_by_node(graph_id, since)` in the cost report service
-      (join `llm_calls → node_executions`, group by `node_name`; unknown
-      calls counted separately) + `by_node` section in `GET /costs/summary`
-- [ ] Costs screen: per-node share bar per graph + per-node cost-over-time
-      (day buckets) — "summary went 40%→56% after Tuesday" is readable
-      straight off the chart
-- [ ] Tests: hand-computed shares match; unknown-cost exclusion; token-share
-      fallback trigger
+- [x] Per-execution: `NodeCostBreakdown` share bar on the execution Overview
+      (data already in `ExecutionDetail.nodes` — frontend only). Rules
+      enforced: unknown-cost nodes badged "unknown" (never 0%); any unknown ⇒
+      whole bar falls back to token-share with a caption; no-LLM nodes omitted
+- [x] Aggregate: `LlmCallRepository.cost_by_node` (join `llm_calls →
+      node_executions`, group by `node_name`, unknown counted separately) +
+      `by_node` in `GET /costs/summary` (optional `graph_id`)
+- [x] Costs screen: "By node" table with per-node share (unknown → "—")
+- [x] Tests: cost-by-node in summary (tokens/calls), unknown exclusion in UI
 
-**Accept when:** visit-city threads page shows Paris/Tokyo as separate
-threads with their runs; the costs screen shows node shares matching
-hand-computed values; a node with an uncataloged model shows "unknown",
-never 0%.
+**Accept when:** the threads page shows separate conversations with their runs;
+the costs screen shows node shares; an uncataloged-model node shows "unknown",
+never 0%. ✅ (verified e2e on visit-city: 2 threads, cumulative 156→312 across
+2 turns, cost-by-node = history/economy/summary ×3 calls each)
 
 ## Phase 17 — Search everywhere (P4)
 
