@@ -79,3 +79,49 @@ async def test_retention_deletes_old_and_cascades() -> None:
         assert remaining == []
 
     await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_prune_payloads_keeps_rollups() -> None:
+    engine = create_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    session_factory = create_session_factory(engine)
+
+    now = datetime(2026, 7, 1, tzinfo=UTC)
+    async with session_factory() as session, session.begin():
+        project = await PostgresProjectRepository(session).get_or_create_default()
+        executions = PostgresExecutionRepository(session)
+        # An old execution carrying input/output payloads + a priced rollup.
+        await executions.upsert(
+            Execution(
+                id=uuid7(),
+                project_id=project.id,
+                trace_id="old",
+                status=ExecutionStatus.SUCCEEDED,
+                started_at=now - timedelta(days=40),
+                input={"q": "hello"},
+                output={"a": "world"},
+            )
+        )
+        await executions.update_rollups(
+            (await executions.get_by_trace_id("old")).id,  # type: ignore[union-attr]
+            TokenUsage(100, 50),
+            __import__("decimal").Decimal("1.5"),
+        )
+
+    async with session_factory() as session, session.begin():
+        pruned = await RetentionService(
+            PostgresExecutionRepository(session)
+        ).prune_payloads_older_than(30, now=now)
+        assert pruned == 1
+
+    async with session_factory() as session:
+        ex = await PostgresExecutionRepository(session).get_by_trace_id("old")
+        assert ex is not None
+        # Payloads nulled, but the row + token/cost rollups survive.
+        assert ex.input is None and ex.output is None
+        assert ex.tokens.total_tokens == 150
+        assert float(ex.total_cost) == 1.5
+
+    await engine.dispose()

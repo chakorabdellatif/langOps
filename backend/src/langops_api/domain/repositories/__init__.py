@@ -108,6 +108,11 @@ class ExecutionRepository(Protocol):
         """
         ...
 
+    async def prune_payloads_older_than(self, cutoff: datetime) -> int:
+        """Null large payload columns for executions older than ``cutoff``,
+        keeping rollup rows; returns the number of executions pruned."""
+        ...
+
 
 class NodeExecutionRepository(Protocol):
     async def upsert(self, node: NodeExecution) -> NodeExecution: ...

@@ -23,6 +23,10 @@ class LangOpsConfig:
     service_name: str = "langgraph-app"
     graph_name: str | None = None  # defaults to the LangGraph graph name
     project: str = "default"
+    # Optional API key sent as an OTLP `authorization: Bearer <key>` header,
+    # for a backend/collector protected by LANGOPS_API_KEY. Falls back to the
+    # LANGOPS_API_KEY environment variable when unset.
+    api_key: str | None = None
 
     # Capture toggles
     capture_state: bool = True

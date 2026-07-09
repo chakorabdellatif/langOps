@@ -16,6 +16,18 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     cors_origins: str = "http://localhost:3000"
 
+    # Optional single-tenant API key. When set, every ingest + query request
+    # must send `Authorization: Bearer <key>`; empty disables auth (default).
+    api_key: str = ""
+
+    # Retention: delete executions older than N days on a periodic in-process
+    # task. 0 disables it. `retention_prune_payloads_days` instead nulls large
+    # payload columns (messages/response/state) while keeping rollup rows, so
+    # metrics history survives; 0 disables.
+    retention_days: int = 0
+    retention_prune_payloads_days: int = 0
+    retention_interval_hours: int = 24
+
     # Ingestion limits
     ingest_max_payload_bytes: int = 4_194_304
     ingest_max_batch_spans: int = 2_048

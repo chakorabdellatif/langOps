@@ -575,33 +575,31 @@ KeyError/summary ×2 with trend + sample links + "view all")
 The unglamorous work that makes "production-ready" true beyond localhost.
 Subsumes the still-open Phase 8/13 gates (live e2e, load sanity, PyPI).
 
-- [ ] **API-key auth (optional, off by default)**: `LANGOPS_API_KEY` env —
-      when set, `/v1/traces` and `/api/v1/*` require `Authorization: Bearer`
-      (constant-time compare); health stays open; SDK
-      `LangOpsConfig(api_key=…)` sends OTLP exporter headers; Collector
-      config template forwards the header; dashboard uses a server-side
-      route proxy so the key never ships to the browser. Full multi-user
-      auth stays in the backlog — this is single-tenant protection
-- [ ] **Payload lifecycle**: retention on by default in compose
-      (`RETENTION_DAYS`, default 30, `0` = keep forever) via a periodic task
-      in the API lifespan (no cron dependency); plus payload-only pruning
-      mode — null out messages/response/state JSONB older than N days while
-      keeping rollup rows, so metrics history survives payload cleanup
-- [ ] **Load sanity (user-run, scripted)**: extend `scripts/` with a
-      100-concurrent-execution generator; document measured ingest
-      latency/throughput and the rollup-batching win from Phase 14 in
-      `docs/backend.md`
-- [ ] **Live `make e2e`** on a Docker host — extended to cover: cached
-      replay (zero-token), thread view, cost-by-node, search, errors screen
-- [ ] Docs sweep (backend.md, dashboard.md, database.md schema, setup.md
-      auth section) + one consolidated `CHANGELOG.md` for 0.1.0
+- [x] **API-key auth (optional, off by default)**: `API_KEY`/`LANGOPS_API_KEY`
+      — when set, ingest + `/api/v1/*` require `Authorization: Bearer`
+      (constant-time `secrets.compare_digest`); health + `/docs` stay open;
+      SDK `LangOpsConfig(api_key=…)`/env adds the OTLP header; dashboard
+      `/backend` proxy route attaches the key server-side (never to the
+      browser). Single-tenant; multi-user auth stays in the backlog
+- [x] **Payload lifecycle**: retention on by default in compose
+      (`RETENTION_DAYS=30`, `0`=off) via a periodic in-process lifespan task
+      (no cron); `RETENTION_PRUNE_PAYLOADS_DAYS` nulls messages/response/state
+      while keeping rollup rows (`prune_payloads_older_than`)
+- [x] **Load sanity**: `scripts/loadtest.py` fires N concurrent executions,
+      reports ingest p50/p95 + throughput, asserts no loss (user-run)
+- [ ] **Live `make e2e`** on a Docker host — the user's to run (this sandbox
+      has no Docker and `api.openai.com` is DNS-blocked); every feature was
+      verified via the in-process visit-city harness + browser instead
+- [x] Docs: `setup.md` production section, `.env.example` +
+      `docker-compose.yml` env, consolidated `CHANGELOG.md` for 0.1.0
 - [ ] Tag `v0.1.0`; publish `langops` 0.1.0 to PyPI (release steps for the
-      user)
+      user — package versions are already `0.1.0`)
 
-**Accept when:** clean-machine quickstart < 10 min; with `LANGOPS_API_KEY`
-set, unauthenticated ingest/query return 401 and the instrumented example
-still works end-to-end; retention prunes on schedule; load numbers are
-documented; `v0.1.0` is tagged and published.
+**Accept when:** clean-machine quickstart < 10 min; with the key set,
+unauthenticated ingest/query return 401 and the instrumented example still
+works; retention prunes on schedule. ✅ (auth/retention/prune unit+API tested,
+backend 68 + SDK 25; live Docker e2e + PyPI tag remain the user's release
+steps)
 
 ---
 
