@@ -25,7 +25,6 @@ DevTools for LangGraph."
 - **[semantic-conventions.md](semantic-conventions.md)** — the SDK ↔ backend
   contract (the `langops.*` / `gen_ai.*` OTel attribute namespace).
 - **[database.md](database.md)** — schema reference.
-- **[contributing.md](contributing.md)** — dev workflow and ground rules.
 - **[adr/](adr/)** — Architecture Decision Records
   ([0001 OTel wire format](adr/adr-0001-otel-as-wire-format.md),
   [0002 pricing catalog](adr/adr-0002-pricing-catalog.md)).
