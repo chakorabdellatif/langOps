@@ -10,7 +10,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
-      - "5432:5432" # exposed for local psql/debugging only
+      - "5432:5432" 
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U langops"]
       interval: 5s
@@ -21,7 +21,7 @@ services:
   redis:
     image: redis:7-alpine
     ports:
-      - "6379:6379" # local debugging only
+      - "6379:6379" 
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -38,9 +38,6 @@ services:
       REDIS_URL: redis://redis:6379/0
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       CORS_ORIGINS: http://localhost:3000
-      # Retention on by default (delete executions older than N days; 0 = keep
-      # forever). Set RETENTION_PRUNE_PAYLOADS_DAYS to null payloads while
-      # keeping rollups. Optional API_KEY protects ingest + query when set.
       RETENTION_DAYS: ${RETENTION_DAYS:-30}
       RETENTION_PRUNE_PAYLOADS_DAYS: ${RETENTION_PRUNE_PAYLOADS_DAYS:-0}
       API_KEY: ${LANGOPS_API_KEY:-}
@@ -50,7 +47,6 @@ services:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
     healthcheck:
-      # python is in the image; curl is not. Non-200 raises → unhealthy.
       test:
         [
           "CMD",
@@ -69,8 +65,8 @@ services:
     volumes:
       - ./collector/otel-collector-config.yaml:/etc/otel/config.yaml:ro
     ports:
-      - "4317:4317" # OTLP gRPC  <- instrumented apps on the host
-      - "4318:4318" # OTLP HTTP  <- instrumented apps on the host
+      - "4317:4317" # OTLP gRPC  
+      - "4318:4318" # OTLP HTTP  
     depends_on:
       api: { condition: service_healthy }
     networks: [langops]

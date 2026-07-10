@@ -22,10 +22,7 @@ processors:
 
 exporters:
   otlphttp/langops:
-    # Inside the compose network the API is reachable by service name.
-    # otlphttp appends the signal path, so spans POST to http://api:8000/v1/traces
-    # as application/x-protobuf (the backend receiver accepts protobuf + JSON).
-    endpoint: http://api:8000
+    endpoint: http://api:8000 #POST to http://api:8000/v1/traces
     retry_on_failure:
       enabled: true
       initial_interval: 1s
