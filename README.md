@@ -2,32 +2,80 @@
 
 > **A lightweight observability and evaluation platform for LangGraph applications.**
 
-![status: v0.1.0](https://img.shields.io/badge/status-v0.1.0-0ea5e9) ![license: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue) ![stack: FastAPI · Next.js · OTel](https://img.shields.io/badge/stack-FastAPI%20·%20Next.js%20·%20OpenTelemetry-111)
+![status: v0.1.0](https://img.shields.io/badge/status-v0.1.0-0ea5e9)
+![license: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)
+![stack: FastAPI · Next.js · OTel](https://img.shields.io/badge/stack-FastAPI%20·%20Next.js%20·%20OpenTelemetry-111)
 
 LangOps is an open-source developer platform that provides deep observability, debugging, and evaluation capabilities for **LangGraph-based AI applications**.
 
-Instead of replacing LangGraph, LangOps integrates seamlessly into existing projects to help developers understand what happens inside their agent workflows. It automatically captures graph executions, node transitions, LLM calls, state changes, token usage, costs, latency, tool invocations, and execution logs, all accessible through a modern web dashboard.
+Instead of replacing LangGraph, LangOps integrates seamlessly into existing projects to help developers understand exactly what happens inside their agent workflows. It automatically captures graph executions, node transitions, LLM calls, state changes, token usage, costs, latency, tool invocations, and execution logs—all accessible through a modern web dashboard.
 
-The goal of LangOps is to become the equivalent of **Chrome DevTools for LangGraph**, allowing developers to monitor, debug, replay, and optimize complex multi-agent systems.
+The goal of LangOps is to become the **Chrome DevTools for LangGraph**, enabling developers to monitor, debug, replay, and optimize complex multi-agent systems from development to production.
 
 ---
-⚠️ LangOps is currently in active development,APIs and features may change as the project evolves. Feedback and contributions are welcome.
 
+> ⚠️ **LangOps is currently in active development (pre-v1.0).**
+> APIs and features may change as the project evolves. Feedback, issues, and contributions are highly welcome.
 
+---
+
+# Dashboard Preview
+
+### Execution Overview
+
+<p align="center">
+    <img src="assets/p4.png" alt="Execution Overview Dashboard" width="95%">
+</p>
+
+The execution overview provides a complete timeline of every LangGraph run, including node execution order, latency, LLM requests, token usage, tool invocations, execution status, and detailed trace metadata.
+
+---
+
+### Graph Visualization
+
+<p align="center">
+    <img src="assets/p2.png" alt="Graph Visualization" width="90%">
+</p>
+
+Visualize your LangGraph workflows as interactive execution graphs. Follow node transitions, inspect execution paths, and quickly understand how your agents move through complex workflows.
+
+---
+
+### Context Growth
+
+<p align="center">
+    <img src="assets/p3.png" alt="Context Growth" width="90%">
+</p>
+
+Monitor how conversation state evolves throughout execution. Inspect state updates, message accumulation, context expansion, and identify unnecessary context growth that impacts latency and token costs.
+
+---
 
 # Documentation
 
-Full docs live in [`docs/`](docs/README.md):
+Full documentation lives inside [`docs/`](docs/README.md).
 
-- **[Setup & Usage](docs/setup.md)** — run the stack and instrument your own app
-- Per-component guides: **[SDK](docs/sdk.md)** · **[Backend](docs/backend.md)** · **[Dashboard](docs/dashboard.md)** · **[Collector](docs/collector.md)** · **[Examples](docs/examples.md)**
-- Reference: **[Architecture](docs/architecture.md)** · **[Semantic Conventions](docs/semantic-conventions.md)** · **[Database](docs/database.md)** · **[ADRs](docs/adr/)**
+## Guides
+
+- **[Setup & Usage](docs/setup.md)** — Install and instrument your application
+- **[SDK](docs/sdk.md)**
+- **[Backend](docs/backend.md)**
+- **[Dashboard](docs/dashboard.md)**
+- **[Collector](docs/collector.md)**
+- **[Examples](docs/examples.md)**
+
+## Reference
+
+- **[Architecture](docs/architecture.md)**
+- **[Semantic Conventions](docs/semantic-conventions.md)**
+- **[Database](docs/database.md)**
+- **[Architecture Decision Records](docs/adr/)**
 
 ---
 
 # Getting Started
 
-## Clone the repository
+Clone the repository
 
 ```bash
 git clone https://github.com/yourusername/langops.git
@@ -35,9 +83,7 @@ git clone https://github.com/yourusername/langops.git
 cd langops
 ```
 
----
-
-## Start all services
+Start the complete stack
 
 ```bash
 docker compose up --build
@@ -45,98 +91,178 @@ docker compose up --build
 
 ---
 
-## Services
+# Services
 
 | Service | URL |
 |----------|-----|
 | Dashboard | http://localhost:3000 |
 | API | http://localhost:8000 |
-| API Docs | http://localhost:8000/docs |
+| API Documentation | http://localhost:8000/docs |
 | PostgreSQL | localhost:5432 |
 | Redis | localhost:6379 |
 
 ---
 
-# Instrumenting a LangGraph Application
+# Instrument a LangGraph Application
 
-Install the SDK (from source during development):
+Install the SDK
 
 ```bash
-pip install -e ./sdk        # published as `langops` on PyPI at 0.1.0
+pip install -e ./sdk
 ```
 
-Wrap your compiled graph — one line, no other changes:
+Instrument your compiled graph
 
 ```python
 from langops import instrument
 
-graph = instrument(graph)   # wraps invoke/ainvoke/stream/astream in place
-graph.invoke(..., config={"configurable": {"thread_id": "abc"}})
+graph = instrument(graph)
+
+graph.invoke(
+    ...,
+    config={
+        "configurable": {
+            "thread_id": "abc"
+        }
+    }
+)
 ```
 
-Spans export via OpenTelemetry to the Collector (default `http://localhost:4317`;
-override with `LangOpsConfig(endpoint=...)`). Every execution — node transitions,
-LLM calls, tokens, state diffs — is captured and appears in the dashboard.
-Instrumentation is fault-isolated: if telemetry ever errors, your graph still
-runs unaffected.
+LangOps exports telemetry using **OpenTelemetry** to the Collector.
+
+Every execution automatically captures:
+
+- Graph executions
+- Node transitions
+- LLM requests & responses
+- Tool invocations
+- State diffs
+- Token usage
+- Cost estimation
+- Execution latency
+- Runtime logs
+
+Instrumentation is fully fault-isolated. If telemetry fails, your LangGraph application continues executing normally.
 
 ---
 
-# Try it end-to-end
+# Try it End-to-End
 
-With the stack running, run the bundled example on the host and watch it appear:
-
-```bash
-docker compose up --build            # terminal 1: the full stack
-pip install -e ./sdk                 # terminal 2
-python examples/simple-agent/main.py # emits an execution to the Collector
-open http://localhost:3000           # the run shows up in the dashboard
-```
-
-Or run the automated acceptance check (builds the stack, runs the example,
-verifies the execution is queryable, and tests Collector-retry resilience by
-killing the API mid-run):
+Run the full platform
 
 ```bash
-make e2e        # bash scripts/e2e-smoke.sh
+docker compose up --build
 ```
+
+Install the SDK
+
+```bash
+pip install -e ./sdk
+```
+
+Run the example application
+
+```bash
+python examples/simple-agent/main.py
+```
+
+Open the dashboard
+
+```text
+http://localhost:3000
+```
+
+The execution will automatically appear inside LangOps.
+
+You can also execute the complete end-to-end smoke test.
+
+```bash
+make e2e
+```
+
+The test:
+
+- Builds the complete Docker stack
+- Executes the example application
+- Verifies execution persistence
+- Tests Collector retry behavior
+- Validates API availability
 
 ---
 
 # Design Principles
 
-LangOps follows four core principles:
+LangOps is built around four principles.
 
-- **Simple** — minimal setup with sensible defaults.
-- **Lightweight** — low runtime overhead and easy integration.
-- **Developer-first** — built for debugging and understanding agent workflows.
-- **Framework-aware** — deeply integrated with LangGraph instead of providing generic abstractions.
+## Simple
+
+Minimal configuration with sensible defaults.
+
+## Lightweight
+
+Low runtime overhead with seamless integration into existing LangGraph projects.
+
+## Developer-first
+
+Designed specifically to help developers inspect, debug, and optimize AI agent workflows.
+
+## Framework-aware
+
+Built specifically for LangGraph instead of generic LLM tracing abstractions.
 
 ---
 
 # Vision
 
-LangOps aims to become the observability layer for LangGraph applications by providing developers with the tools needed to inspect, monitor, debug, and optimize AI agent workflows from local development to production.
+LangOps aims to become the observability platform for LangGraph.
+
+The long-term vision extends beyond tracing into a complete developer platform for AI agents, including:
+
+- Execution replay
+- State inspection
+- Graph debugging
+- Performance profiling
+- Cost analysis
+- Prompt inspection
+- Evaluation pipelines
+- Production monitoring
+
+Just as Chrome DevTools transformed web development, LangOps aims to become the essential debugging toolkit for LangGraph applications.
 
 ---
 
 # Contributing
 
-Contributions are welcome. Start with the [Architecture Design Document](docs/architecture.md)
-(the implementation blueprint) and [`docs/contributing.md`](docs/contributing.md).
+Contributions are always welcome.
+
+Before contributing, please read:
+
+- [Architecture Design](docs/architecture.md)
+- [Contributing Guide](docs/contributing.md)
+
+Setup
 
 ```bash
 cp .env.example .env
-make lint      # ruff + mypy + import-linter (backend) + eslint/tsc (dashboard)
-make test      # unit + API tests for sdk, backend, dashboard
-make e2e       # full Docker pipeline smoke test (needs Docker running)
+
+make lint
+
+make test
+
+make e2e
 ```
 
-Ground rules: keep the backend layering (`presentation → application → domain ← infrastructure`,
-enforced by import-linter); never invent an OTel attribute without adding it to
-[`docs/semantic-conventions.md`](docs/semantic-conventions.md) first; significant
-decisions get an ADR in [`docs/adr/`](docs/adr/); Conventional Commits.
+Development guidelines
+
+- Respect the backend architecture layers
+- Register new OpenTelemetry attributes in `docs/semantic-conventions.md`
+- Document major architectural decisions using ADRs
+- Follow Conventional Commits
+
+---
 
 # License
 
-[Apache-2.0](LICENSE).
+Licensed under the Apache-2.0 License.
+
+See [LICENSE](LICENSE).
