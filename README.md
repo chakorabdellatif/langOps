@@ -11,6 +11,7 @@ Instead of replacing LangGraph, LangOps integrates seamlessly into existing proj
 The goal of LangOps is to become the equivalent of **Chrome DevTools for LangGraph**, allowing developers to monitor, debug, replay, and optimize complex multi-agent systems.
 
 ---
+⚠️ LangOps is currently in active development,APIs and features may change as the project evolves. Feedback and contributions are welcome.
 
 
 
